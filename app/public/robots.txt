@@ -1,0 +1,10 @@
+# https://www.robotstxt.org/
+
+User-agent: *
+
+Disallow: /checkout
+Disallow: /payment
+Disallow: /notify
+Disallow: /tickets
+
+Sitemap: https://talantasportstickets.co.ke/sitemap.xml
