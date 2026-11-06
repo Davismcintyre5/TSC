@@ -155,89 +155,14 @@ export const holdTickets = asyncHandler(async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Daraja M-Pesa (unchanged)
+// M-Pesa — fulfilled by Paystack (returns authorizationUrl for frontend redirect)
 // ---------------------------------------------------------------------------
 
 export const mpesaInitiate = asyncHandler(async (req, res) => {
   const { paymentId, phone, email, firstName, lastName } = req.body;
-  const payment = await Payment.findById(paymentId);
-  if (!payment) throw ApiError.notFound("Payment not found");
-  if (payment.status !== "pending") throw ApiError.badRequest("Payment not pending");
-
-  if (!phone) throw ApiError.badRequest("Phone required", "PHONE_REQUIRED");
-
-  await attachBuyer(payment, { phone, email, firstName, lastName });
-
-  const normPhone = mpesa.normalizePhone(phone);
-
-  const result = await mpesa.initiateSTKPush({
-    phone: normPhone,
-    amount: payment.amount,
-    accountReference: "Talanta",
-    description: "Tickets",
-  });
-
-  if (!result.success) {
-    payment.status = "failed";
-    await payment.save();
-    throw ApiError.badRequest("M-Pesa request failed", "MPESA_FAILED", result.error);
-  }
-
-  payment.mpesa = {
-    checkoutRequestId: result.checkoutRequestId,
-    merchantRequestId: result.merchantRequestId,
-    phone: normPhone,
-  };
-  await payment.save();
-
-  ok(res, {
-    paymentId: payment._id,
-    checkoutRequestId: result.checkoutRequestId,
-    customerMessage: result.customerMessage,
-  });
-});
-
-export const mpesaCallback = asyncHandler(async (req, res) => {
-  const data = mpesa.parseCallback(req.body);
-
-  if (mpesa.isDuplicateCallback(data.checkoutRequestId)) {
-    logger.info({ checkoutRequestId: data.checkoutRequestId }, "M-Pesa duplicate ignored");
-    return res.json({ success: true, message: "Duplicate ignored" });
-  }
-
-  const payment = await Payment.findOne({
-    "mpesa.checkoutRequestId": data.checkoutRequestId,
-  });
-  if (!payment) {
-    logger.warn({ checkoutRequestId: data.checkoutRequestId }, "Payment not found for callback");
-    return res.json({ success: true, message: "No matching payment" });
-  }
-
-  if (!data.success) {
-    payment.status = "failed";
-    await payment.save();
-    return res.json({ success: true });
-  }
-
-  payment.mpesa.mpesaReceipt = data.mpesaReceiptNumber;
-  await finalizePaid(payment);
-
-  logger.info(
-    { checkoutRequestId: data.checkoutRequestId, receipt: data.mpesaReceiptNumber },
-    "M-Pesa paid"
-  );
-  res.json({ success: true });
-});
-
-// ---------------------------------------------------------------------------
-// Paystack M-Pesa (new)
-// ---------------------------------------------------------------------------
-
-export const paystackInitiate = asyncHandler(async (req, res) => {
-  const { paymentId, phone, email, firstName, lastName } = req.body;
   if (!paymentId) throw ApiError.badRequest("paymentId required", "PAYMENT_ID_REQUIRED");
   if (!phone) throw ApiError.badRequest("Phone required", "PHONE_REQUIRED");
-  if (!email) throw ApiError.badRequest("Email required for Paystack", "EMAIL_REQUIRED");
+  if (!email) throw ApiError.badRequest("Email required", "EMAIL_REQUIRED");
 
   const payment = await Payment.findById(paymentId);
   if (!payment) throw ApiError.notFound("Payment not found");
@@ -255,10 +180,10 @@ export const paystackInitiate = asyncHandler(async (req, res) => {
     metadata: { paymentId: String(payment._id) },
   });
 
-  if (!result.success) {
+  if (!result.success || !result.authorizationUrl) {
     payment.status = "failed";
     await payment.save();
-    throw ApiError.badRequest("Paystack request failed", "PAYSTACK_FAILED", result.error);
+    throw ApiError.badRequest("Payment request failed", "PAYSTACK_FAILED", result.error);
   }
 
   payment.method = "mpesa";
@@ -272,10 +197,17 @@ export const paystackInitiate = asyncHandler(async (req, res) => {
   ok(res, {
     paymentId: payment._id,
     reference: result.reference,
-    authorizationUrl: result.authorizationUrl,
+    authorizationUrl: result.authorizationUrl, // frontend redirects here
     accessCode: result.accessCode,
   });
 });
+
+// Kept for backward compat if anything calls it
+export const paystackInitiate = mpesaInitiate;
+
+// ---------------------------------------------------------------------------
+// Paystack webhook (server-to-server confirmation)
+// ---------------------------------------------------------------------------
 
 export const paystackWebhook = asyncHandler(async (req, res) => {
   const signature = req.get("x-paystack-signature");
@@ -291,10 +223,8 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
     return res.status(200).json({ success: true, message: "Ignored malformed" });
   }
 
-  // Respond 200 immediately — Paystack retries on non-200 for 72h.
   res.status(200).json({ success: true, received: true });
 
-  // Async fulfilment
   try {
     if (parsed.event === "charge.success") {
       const paymentId = parsed.metadata?.paymentId;
@@ -319,10 +249,7 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
       payment.paystack = {
         ...(payment.paystack || {}),
         reference: parsed.reference,
-        mpesaReceipt:
-          verify.authorization?.receipt_number ||
-          parsed.raw?.receipt_number ||
-          null,
+        mpesaReceipt: verify.authorization?.receipt_number || parsed.raw?.receipt_number || null,
         paidAt: new Date(),
       };
       await finalizePaid(payment);
@@ -342,16 +269,31 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Paystack verify (called by frontend /payment/callback)
+// Self-heals: if Paystack says success but DB still pending, fulfil now.
+// ---------------------------------------------------------------------------
+
 export const paystackVerify = asyncHandler(async (req, res) => {
   const { reference } = req.params;
   if (!reference) throw ApiError.badRequest("reference required", "REFERENCE_REQUIRED");
 
-  const payment = await Payment.findOne({ "paystack.reference": reference }).lean();
+  const payment = await Payment.findOne({ "paystack.reference": reference });
   if (!payment) throw ApiError.notFound("Payment not found for reference");
 
   const verify = await paystack.verifyTransaction(reference);
   if (!verify.success) {
     throw ApiError.badRequest("Paystack verify failed", "PAYSTACK_VERIFY_FAILED", verify.error);
+  }
+
+  if (verify.status === "success" && payment.status !== "paid") {
+    payment.paystack = {
+      ...(payment.paystack || {}),
+      reference,
+      mpesaReceipt: verify.authorization?.receipt_number || null,
+      paidAt: new Date(),
+    };
+    await finalizePaid(payment);
   }
 
   ok(res, {

@@ -37,7 +37,6 @@ export default function PaymentCallback() {
           setState("failed");
           setMessage("Payment was not completed. You can try again.");
         } else {
-          // "ongoing" | "pending" | "queued" — ask user to wait or check tickets
           setState("pending");
           setMessage("Payment is still processing. Check your tickets in a moment.");
         }

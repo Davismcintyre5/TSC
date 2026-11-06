@@ -85,18 +85,38 @@ export default function Checkout() {
           lastName
         );
 
-        // Backend fulfills via Paystack under the hood and returns a checkout URL.
-        // UI still says "M-PESA" — we just redirect the user there.
-        const redirectUrl = r?.data?.authorizationUrl || r?.authorizationUrl;
-        if (redirectUrl) {
-          setMethod("mpesa");
-          window.location.href = redirectUrl;
+        // Backend returns accessCode from Paystack initialize
+        const accessCode =
+          r?.data?.data?.accessCode ||
+          r?.data?.accessCode ||
+          r?.accessCode;
+
+        if (!accessCode) {
+          toast.error("Could not start payment. Please try again.");
           return;
         }
 
-        // Fallback: no redirect URL returned
         setMethod("mpesa");
-        nav(`/payment/${hold.paymentId}`);
+
+        if (typeof window.PaystackPop === "undefined") {
+          toast.error("Payment library not loaded. Refresh the page.");
+          return;
+        }
+
+        const popup = new window.PaystackPop();
+        popup.resumeTransaction(accessCode, {
+          onSuccess: (transaction) => {
+            // Popup success is NOT proof — verify server-side via callback page
+            nav(`/payment/callback?reference=${transaction.reference}`);
+          },
+          onCancel: () => {
+            toast.error("Payment cancelled.");
+          },
+          onError: (err) => {
+            toast.error(err?.message || "Payment failed. Please try again.");
+          },
+        });
+
         return;
       } else if (method === "card") {
         await cardIntent(hold.paymentId, email, firstName, lastName, buildFullPhone());
