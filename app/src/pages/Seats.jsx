@@ -456,34 +456,321 @@ function Select({ label, value, onChange, options }) {
 }
 
 function StadiumMap({ level }) {
-  const stroke = "rgba(148,163,184,0.25)";
+  // Per-level ring geometry: radius, section count, seat count per section
+  const RINGS = {
+    L1: { rx: 170, ry: 122, sections: 28, seatsPerSection: 5, active: true },
+    L2: { rx: 145, ry: 100, sections: 20, seatsPerSection: 4, active: true },
+    L3: { rx: 120, ry: 80, sections: 36, seatsPerSection: 3, active: true },
+    gold: { rx: 120, ry: 80, sections: 5, seatsPerSection: 6, active: true },
+    platinum: { rx: 120, ry: 80, sections: 5, seatsPerSection: 6, active: true },
+    skybox: { rx: 120, ry: 80, sections: 58, seatsPerSection: 2, active: true },
+    accessible: { rx: 120, ry: 80, sections: 28, seatsPerSection: 4, active: true },
+  };
 
-  const ring =
-    level === "L1"
-      ? { rx: 150, ry: 101, count: 28, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
-      : level === "L2"
-      ? { rx: 130, ry: 85, count: 20, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
-      : level === "L3"
-      ? { rx: 110, ry: 68, count: 36, color: "rgba(148,163,184,0.4)", stroke: "rgba(148,163,184,0.6)" }
-      : { rx: 110, ry: 68, count: 16, color: "rgba(245,166,35,0.5)", stroke: "rgba(245,166,35,0.8)" };
+  const ring = RINGS[level] || RINGS.L1;
+  const cx = 240;
+  const cy = 180;
+
+  // Kenya flag colors
+  const black = "#0e1116";
+  const red = "#bb0000";
+  const green = "#006600";
+  const gold = "#f5a623";
+
+  // Determine fill style per level
+  const sectionFill =
+    level === "gold" || level === "platinum" || level === "skybox"
+      ? gold
+      : level === "accessible"
+      ? "#3b82f6"
+      : green;
+
+  // Section positions
+  const sectionDots = Array.from({ length: ring.sections }).map((_, i) => {
+    const angle = (i / ring.sections) * Math.PI * 2 - Math.PI / 2;
+    return {
+      i,
+      angle,
+      x: cx + Math.cos(angle) * ring.rx,
+      y: cy + Math.sin(angle) * ring.ry,
+    };
+  });
+
+  // Seat dots: orbit around each section
+  const seatDots = [];
+  sectionDots.forEach((sec, si) => {
+    for (let s = 0; s < ring.seatsPerSection; s++) {
+      const offset = (s - (ring.seatsPerSection - 1) / 2) * 4;
+      const seatAngle =
+        (si / ring.sections) * Math.PI * 2 +
+        (s - (ring.seatsPerSection - 1) / 2) * 0.012 -
+        Math.PI / 2;
+      seatDots.push({
+        x: cx + Math.cos(seatAngle) * (ring.rx + offset + 8),
+        y: cy + Math.sin(seatAngle) * (ring.ry + offset + 8),
+        sectionIndex: si,
+      });
+    }
+  });
 
   return (
-    <svg viewBox="0 0 400 300" className="w-full h-full max-w-[560px]">
-      <ellipse cx="200" cy="150" rx="160" ry="110" fill="none" stroke={stroke} strokeWidth="1.5" />
-      <ellipse cx="200" cy="150" rx="140" ry="92" fill="none" stroke={stroke} strokeWidth="1" />
-      <ellipse cx="200" cy="150" rx="120" ry="74" fill="none" stroke={stroke} strokeWidth="1" />
-      <ellipse cx="200" cy="150" rx="100" ry="56" fill="none" stroke={stroke} strokeWidth="1" />
+    <svg
+      viewBox="0 0 480 360"
+      className="w-full h-full max-w-[720px]"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <defs>
+        <radialGradient id="pitchGrad" cx="50%" cy="50%" r="60%">
+          <stop offset="0%" stopColor={green} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={green} stopOpacity="0.05" />
+        </radialGradient>
+        <radialGradient id="stadiumGrad" cx="50%" cy="40%" r="70%">
+          <stop offset="0%" stopColor={black} stopOpacity="0" />
+          <stop offset="100%" stopColor={black} stopOpacity="0.6" />
+        </radialGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
 
-      <ellipse cx="200" cy="150" rx="80" ry="42" fill="#22c55e" opacity="0.08" />
-      <rect x="140" y="130" width="120" height="40" fill="#22c55e" opacity="0.12" />
+      {/* Kenya flag outer ring */}
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx + 28}
+        ry={ring.ry + 22}
+        fill="none"
+        stroke={black}
+        strokeWidth="2"
+        opacity="0.4"
+      />
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx + 22}
+        ry={ring.ry + 18}
+        fill="none"
+        stroke={red}
+        strokeWidth="1.5"
+        opacity="0.5"
+      />
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx + 16}
+        ry={ring.ry + 14}
+        fill="none"
+        stroke={green}
+        strokeWidth="1.5"
+        opacity="0.5"
+      />
 
-      <g fill={ring.color} stroke={ring.stroke} strokeWidth="0.5">
-        {Array.from({ length: ring.count }).map((_, i) => {
-          const a = (i / ring.count) * Math.PI * 2;
-          const x = 200 + Math.cos(a) * ring.rx;
-          const y = 150 + Math.sin(a) * ring.ry;
-          return <circle key={i} cx={x} cy={y} r="4" />;
-        })}
+      {/* Stadium shadow gradient */}
+      <ellipse cx={cx} cy={cy} rx={ring.rx + 40} ry={ring.ry + 30} fill="url(#stadiumGrad)" />
+
+      {/* Outer ring (structure) */}
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx + 10}
+        ry={ring.ry + 8}
+        fill="none"
+        stroke="rgba(148,163,184,0.3)"
+        strokeWidth="1"
+      />
+
+      {/* Main section ring */}
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx}
+        ry={ring.ry}
+        fill="none"
+        stroke="rgba(148,163,184,0.4)"
+        strokeWidth="2"
+        strokeDasharray="3 3"
+      />
+
+      {/* Inner service ring */}
+      <ellipse
+        cx={cx}
+        cy={cy}
+        rx={ring.rx - 25}
+        ry={ring.ry - 18}
+        fill="none"
+        stroke="rgba(148,163,184,0.2)"
+        strokeWidth="1"
+      />
+
+      {/* Pitch (center) */}
+      <ellipse cx={cx} cy={cy} rx="90" ry="55" fill="url(#pitchGrad)" />
+      <rect
+        x={cx - 75}
+        y={cy - 40}
+        width="150"
+        height="80"
+        fill="none"
+        stroke={green}
+        strokeOpacity="0.4"
+        strokeWidth="1.5"
+      />
+      {/* Center line */}
+      <line
+        x1={cx}
+        y1={cy - 40}
+        x2={cx}
+        y2={cy + 40}
+        stroke={green}
+        strokeOpacity="0.4"
+        strokeWidth="1.5"
+      />
+      {/* Center circle */}
+      <circle
+        cx={cx}
+        cy={cy}
+        r="14"
+        fill="none"
+        stroke={green}
+        strokeOpacity="0.5"
+        strokeWidth="1.5"
+      />
+      <circle cx={cx} cy={cy} r="2" fill={green} opacity="0.6" />
+
+      {/* Goal areas */}
+      <rect
+        x={cx - 100}
+        y={cy - 20}
+        width="25"
+        height="40"
+        fill="none"
+        stroke={green}
+        strokeOpacity="0.35"
+        strokeWidth="1"
+      />
+      <rect
+        x={cx + 75}
+        y={cy - 20}
+        width="25"
+        height="40"
+        fill="none"
+        stroke={green}
+        strokeOpacity="0.35"
+        strokeWidth="1"
+      />
+
+      {/* Section markers — small arcs/capsules around the ring */}
+      {sectionDots.map((sec) => {
+        const isActive = sec.i % 3 !== 0; // simulate some sold-out sections
+        return (
+          <g key={`sec-${sec.i}`}>
+            {/* Section block */}
+            <rect
+              x={sec.x - 5}
+              y={sec.y - 3}
+              width="10"
+              height="6"
+              rx="1"
+              fill={isActive ? sectionFill : "#2a3240"}
+              opacity={isActive ? 0.55 : 0.35}
+              transform={`rotate(${(sec.angle * 180) / Math.PI} ${sec.x} ${sec.y})`}
+            />
+            {/* Section number label on hover highlight */}
+            <circle
+              cx={sec.x}
+              cy={sec.y}
+              r="8"
+              fill="transparent"
+              className="cursor-pointer"
+            >
+              <title>Section {sec.i + 1}</title>
+            </circle>
+          </g>
+        );
+      })}
+
+      {/* Seat dots (small, dense) */}
+      {seatDots.map((seat, idx) => (
+        <circle
+          key={`seat-${idx}`}
+          cx={seat.x}
+          cy={seat.y}
+          r="1.2"
+          fill={sectionFill}
+          opacity="0.7"
+        />
+      ))}
+
+      {/* Cardinal markers */}
+      <text
+        x={cx}
+        y={cy - ring.ry - 18}
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill={gold}
+      >
+        N
+      </text>
+      <text
+        x={cx}
+        y={cy + ring.ry + 28}
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill={gold}
+        opacity="0.5"
+      >
+        S
+      </text>
+      <text
+        x={cx - ring.rx - 30}
+        y={cy + 4}
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill={gold}
+        opacity="0.5"
+      >
+        W
+      </text>
+      <text
+        x={cx + ring.rx + 30}
+        y={cy + 4}
+        textAnchor="middle"
+        fontSize="10"
+        fontWeight="700"
+        fill={gold}
+        opacity="0.5"
+      >
+        E
+      </text>
+
+      {/* Level badge */}
+      <g filter="url(#glow)">
+        <rect
+          x={cx - 28}
+          y={cy + ring.ry + 34}
+          width="56"
+          height="18"
+          rx="9"
+          fill={black}
+          stroke={gold}
+          strokeWidth="1"
+        />
+        <text
+          x={cx}
+          y={cy + ring.ry + 47}
+          textAnchor="middle"
+          fontSize="10"
+          fontWeight="700"
+          fill={gold}
+        >
+          {level}
+        </text>
       </g>
     </svg>
   );
