@@ -15,13 +15,15 @@ export default function Login() {
   const [step, setStep] = useState("identifier");
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
+  const [sentTo, setSentTo] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const sendCode = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await authApi.requestCode(identifier);
+      const r = await authApi.requestCode(identifier);
+      setSentTo(r.data?.sentTo || []);
       setStep("code");
       toast.success("Code sent.");
     } catch (err) {
@@ -45,6 +47,15 @@ export default function Login() {
     }
   };
 
+  const sentLabel = () => {
+    if (sentTo.includes("email") && sentTo.includes("sms")) {
+      return "your email and phone";
+    }
+    if (sentTo.includes("email")) return "your email";
+    if (sentTo.includes("sms")) return "your phone";
+    return identifier;
+  };
+
   return (
     <div className="max-w-md mx-auto px-4 py-16">
       <h1 className="text-2xl font-extrabold mb-2">Log in</h1>
@@ -61,7 +72,9 @@ export default function Login() {
             onChange={(e) => setIdentifier(e.target.value)}
             required
           />
-          <Button type="submit" loading={loading} className="w-full">Send code</Button>
+          <Button type="submit" loading={loading} className="w-full">
+            Send code
+          </Button>
           <p className="text-xs text-ink-muted text-center">
             By logging in you agree to the Terms and the Privacy Policy.
           </p>
@@ -69,7 +82,7 @@ export default function Login() {
       ) : (
         <form onSubmit={verify} className="space-y-4">
           <p className="text-sm text-ink-muted">
-            Code sent to <strong className="text-ink">{identifier}</strong>
+            Code sent to <strong className="text-ink">{sentLabel()}</strong>
           </p>
           <Input
             label="Enter code"
@@ -80,7 +93,9 @@ export default function Login() {
             maxLength={6}
             required
           />
-          <Button type="submit" loading={loading} className="w-full">Verify</Button>
+          <Button type="submit" loading={loading} className="w-full">
+            Verify
+          </Button>
           <button
             type="button"
             onClick={() => setStep("identifier")}

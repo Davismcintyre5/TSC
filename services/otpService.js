@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import bcrypt from "bcryptjs";
 import env from "../config/env.js";
 import OTP from "../models/OTP.js";
+import Ticket from "../models/Ticket.js";
 import * as emailService from "./emailService.js";
 import * as smsService from "./smsService.js";
 import { detectChannel, normalizeIdentifier } from "../utils/identifier.js";
@@ -11,6 +11,25 @@ const generateCode = (length) =>
   Array.from({ length }, () => crypto.randomInt(0, 10)).join("");
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+const findBuyerContact = async (identifier) => {
+  const ticket = await Ticket.findOne({
+    $or: [
+      { "buyer.identifier": identifier },
+      { "buyer.email": identifier },
+      { "buyer.phone": identifier },
+    ],
+  })
+    .select("buyer.email buyer.phone")
+    .lean();
+
+  if (!ticket?.buyer) return { email: null, phone: null };
+
+  return {
+    email: ticket.buyer.email || null,
+    phone: ticket.buyer.phone || null,
+  };
+};
 
 export const request = async ({ identifier }) => {
   const norm = normalizeIdentifier(identifier);
@@ -31,13 +50,25 @@ export const request = async ({ identifier }) => {
 
   const payload = { code, ttlMinutes: env.OTP_TTL_MINUTES };
 
-  if (norm.channel === "email") {
-    await emailService.sendOtp(norm.value, payload);
-  } else {
-    await smsService.sendOtp(norm.value, payload);
+  const contact = await findBuyerContact(norm.value);
+  const emailTarget = contact.email || (norm.channel === "email" ? norm.value : null);
+  const phoneTarget = contact.phone || (norm.channel === "sms" ? norm.value : null);
+
+  const sends = [];
+  if (emailTarget) {
+    sends.push(emailService.sendOtp(emailTarget, payload).catch(() => {}));
+  }
+  if (phoneTarget) {
+    sends.push(smsService.sendOtp(phoneTarget, payload).catch(() => {}));
   }
 
-  return { channel: norm.channel, expiresIn: env.OTP_TTL_MINUTES };
+  await Promise.allSettled(sends);
+
+  const channels = [];
+  if (emailTarget) channels.push("email");
+  if (phoneTarget) channels.push("sms");
+
+  return { channel: norm.channel, expiresIn: env.OTP_TTL_MINUTES, sentTo: channels };
 };
 
 export const verify = async ({ identifier, code }) => {

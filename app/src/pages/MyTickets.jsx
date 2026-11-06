@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   myTickets,
   downloadTicketPdf,
   downloadTicketPng,
 } from "../api/tickets.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../components/ui/Toast.jsx";
 import { Badge, Button, Spinner } from "../components/ui/index.js";
 import { money } from "../utils/format.js";
@@ -25,6 +26,8 @@ const saveBlob = (blob, filename) => {
 
 export default function MyTickets() {
   const toast = useToast();
+  const nav = useNavigate();
+  const { logout } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState({});
@@ -35,6 +38,11 @@ export default function MyTickets() {
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  const onLogout = () => {
+    logout();
+    nav("/login", { replace: true });
+  };
 
   const download = async (t, format) => {
     const key = `${t._id}-${format}`;
@@ -62,7 +70,15 @@ export default function MyTickets() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
-      <h1 className="text-2xl font-extrabold mb-6">My tickets</h1>
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <h1 className="text-2xl font-extrabold">My tickets</h1>
+        <button
+          onClick={onLogout}
+          className="text-sm text-ink-muted hover:text-kenya-red"
+        >
+          Log out
+        </button>
+      </div>
 
       {tickets.length === 0 ? (
         <div className="bg-surface border border-surface-line rounded-xl p-10 text-center">

@@ -13,7 +13,14 @@ export const me = asyncHandler(async (req, res) => {
 });
 
 export const listTickets = asyncHandler(async (req, res) => {
-  const tickets = await Ticket.find({ "buyer.identifier": req.user.identifier })
+  const id = req.user.identifier;
+  const tickets = await Ticket.find({
+    $or: [
+      { "buyer.identifier": id },
+      { "buyer.email": id },
+      { "buyer.phone": id },
+    ],
+  })
     .populate("categoryId", "name section tier price currency")
     .sort({ createdAt: -1 })
     .lean();
@@ -26,9 +33,14 @@ const loadTicketPayload = async (req) => {
     .lean();
 
   if (!ticket) throw ApiError.notFound("Ticket not found");
-  if (ticket.buyer.identifier !== req.user.identifier) {
-    throw ApiError.forbidden("Not your ticket", "NOT_YOUR_TICKET");
-  }
+
+  const id = req.user.identifier;
+  const owns =
+    ticket.buyer?.identifier === id ||
+    ticket.buyer?.email === id ||
+    ticket.buyer?.phone === id;
+
+  if (!owns) throw ApiError.forbidden("Not your ticket", "NOT_YOUR_TICKET");
   if (!["paid", "used"].includes(ticket.status)) {
     throw ApiError.badRequest("Ticket not paid", "TICKET_NOT_PAID");
   }
