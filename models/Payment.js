@@ -18,6 +18,13 @@ const paymentSchema = new mongoose.Schema(
       mpesaReceipt: String,
       phone: String,
     },
+    paystack: {
+      reference: { type: String, index: true, sparse: true },
+      accessCode: String,
+      phone: String,
+      mpesaReceipt: String,
+      paidAt: Date,
+    },
     card: {
       providerRef: String,
       last4: String,

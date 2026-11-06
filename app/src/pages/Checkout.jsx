@@ -77,9 +77,27 @@ export default function Checkout() {
     setLoading(true);
     try {
       if (method === "mpesa") {
-        await mpesaInitiate(hold.paymentId, buildFullPhone(), email, firstName, lastName);
+        const r = await mpesaInitiate(
+          hold.paymentId,
+          buildFullPhone(),
+          email,
+          firstName,
+          lastName
+        );
+
+        // Backend fulfills via Paystack under the hood and returns a checkout URL.
+        // UI still says "M-PESA" — we just redirect the user there.
+        const redirectUrl = r?.data?.authorizationUrl || r?.authorizationUrl;
+        if (redirectUrl) {
+          setMethod("mpesa");
+          window.location.href = redirectUrl;
+          return;
+        }
+
+        // Fallback: no redirect URL returned
         setMethod("mpesa");
-        toast.success("Check your phone for the M-Pesa prompt.");
+        nav(`/payment/${hold.paymentId}`);
+        return;
       } else if (method === "card") {
         await cardIntent(hold.paymentId, email, firstName, lastName, buildFullPhone());
         setMethod("card");

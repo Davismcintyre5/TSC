@@ -6,6 +6,7 @@ import Payment from "../../models/Payment.js";
 import Ticket from "../../models/Ticket.js";
 import PriceCategory from "../../models/PriceCategory.js";
 import * as mpesa from "../../services/payments/mpesaService.js";
+import * as paystack from "../../services/payments/paystackService.js";
 import * as cardService from "../../services/payments/cardService.js";
 import * as bankService from "../../services/payments/bankService.js";
 import * as emailService from "../../services/emailService.js";
@@ -63,6 +64,10 @@ const finalizePaid = async (payment) => {
     }
   }
 };
+
+// ---------------------------------------------------------------------------
+// Tickets
+// ---------------------------------------------------------------------------
 
 export const holdTickets = asyncHandler(async (req, res) => {
   const { items } = req.body;
@@ -149,6 +154,10 @@ export const holdTickets = asyncHandler(async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Daraja M-Pesa (unchanged)
+// ---------------------------------------------------------------------------
+
 export const mpesaInitiate = asyncHandler(async (req, res) => {
   const { paymentId, phone, email, firstName, lastName } = req.body;
   const payment = await Payment.findById(paymentId);
@@ -220,6 +229,147 @@ export const mpesaCallback = asyncHandler(async (req, res) => {
   res.json({ success: true });
 });
 
+// ---------------------------------------------------------------------------
+// Paystack M-Pesa (new)
+// ---------------------------------------------------------------------------
+
+export const paystackInitiate = asyncHandler(async (req, res) => {
+  const { paymentId, phone, email, firstName, lastName } = req.body;
+  if (!paymentId) throw ApiError.badRequest("paymentId required", "PAYMENT_ID_REQUIRED");
+  if (!phone) throw ApiError.badRequest("Phone required", "PHONE_REQUIRED");
+  if (!email) throw ApiError.badRequest("Email required for Paystack", "EMAIL_REQUIRED");
+
+  const payment = await Payment.findById(paymentId);
+  if (!payment) throw ApiError.notFound("Payment not found");
+  if (payment.status !== "pending") {
+    throw ApiError.badRequest("Payment not pending", "PAYMENT_NOT_PENDING");
+  }
+
+  await attachBuyer(payment, { phone, email, firstName, lastName });
+
+  const result = await paystack.initiateSTKPush({
+    email: String(email).trim().toLowerCase(),
+    phone,
+    amountKES: payment.amount,
+    reference: `TSC-${payment._id}-${Date.now()}`,
+    metadata: { paymentId: String(payment._id) },
+  });
+
+  if (!result.success) {
+    payment.status = "failed";
+    await payment.save();
+    throw ApiError.badRequest("Paystack request failed", "PAYSTACK_FAILED", result.error);
+  }
+
+  payment.method = "mpesa";
+  payment.paystack = {
+    reference: result.reference,
+    accessCode: result.accessCode,
+    phone: paystack.normalizePhone(phone),
+  };
+  await payment.save();
+
+  ok(res, {
+    paymentId: payment._id,
+    reference: result.reference,
+    authorizationUrl: result.authorizationUrl,
+    accessCode: result.accessCode,
+  });
+});
+
+export const paystackWebhook = asyncHandler(async (req, res) => {
+  const signature = req.get("x-paystack-signature");
+  const rawBody = req.rawBody;
+
+  if (!paystack.verifyWebhookSignature(rawBody, signature)) {
+    logger.warn({ signature }, "Paystack webhook signature invalid");
+    return res.status(401).json({ success: false, message: "Invalid signature" });
+  }
+
+  const parsed = paystack.parseWebhook(req.body);
+  if (!parsed.valid) {
+    return res.status(200).json({ success: true, message: "Ignored malformed" });
+  }
+
+  // Respond 200 immediately — Paystack retries on non-200 for 72h.
+  res.status(200).json({ success: true, received: true });
+
+  // Async fulfilment
+  try {
+    if (parsed.event === "charge.success") {
+      const paymentId = parsed.metadata?.paymentId;
+      if (!paymentId) {
+        logger.warn({ reference: parsed.reference }, "Paystack webhook: missing metadata.paymentId");
+        return;
+      }
+
+      const payment = await Payment.findById(paymentId);
+      if (!payment) {
+        logger.warn({ paymentId }, "Paystack webhook: payment not found");
+        return;
+      }
+      if (payment.status === "paid") return;
+
+      const verify = await paystack.verifyTransaction(parsed.reference);
+      if (!verify.success || verify.status !== "success") {
+        logger.warn({ reference: parsed.reference }, "Paystack verify not success");
+        return;
+      }
+
+      payment.paystack = {
+        ...(payment.paystack || {}),
+        reference: parsed.reference,
+        mpesaReceipt:
+          verify.authorization?.receipt_number ||
+          parsed.raw?.receipt_number ||
+          null,
+        paidAt: new Date(),
+      };
+      await finalizePaid(payment);
+
+      logger.info({ paymentId, reference: parsed.reference }, "Paystack paid");
+    } else if (parsed.event === "charge.failed") {
+      const paymentId = parsed.metadata?.paymentId;
+      if (paymentId) {
+        await Payment.findByIdAndUpdate(paymentId, { status: "failed" });
+      }
+    }
+  } catch (err) {
+    logger.error(
+      { err: err.message, reference: parsed.reference },
+      "Paystack webhook post-processing error"
+    );
+  }
+});
+
+export const paystackVerify = asyncHandler(async (req, res) => {
+  const { reference } = req.params;
+  if (!reference) throw ApiError.badRequest("reference required", "REFERENCE_REQUIRED");
+
+  const payment = await Payment.findOne({ "paystack.reference": reference }).lean();
+  if (!payment) throw ApiError.notFound("Payment not found for reference");
+
+  const verify = await paystack.verifyTransaction(reference);
+  if (!verify.success) {
+    throw ApiError.badRequest("Paystack verify failed", "PAYSTACK_VERIFY_FAILED", verify.error);
+  }
+
+  ok(res, {
+    paymentId: payment._id,
+    reference,
+    status: payment.status,
+    paystackStatus: verify.status,
+    amount: verify.amount,
+    currency: verify.currency,
+    channel: verify.channel,
+    paidAt: verify.paidAt,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stripe (unchanged)
+// ---------------------------------------------------------------------------
+
 export const cardIntent = asyncHandler(async (req, res) => {
   const { paymentId, email, firstName, lastName, phone } = req.body;
   const payment = await Payment.findById(paymentId);
@@ -268,6 +418,10 @@ export const cardWebhook = asyncHandler(async (req, res) => {
   res.json({ received: true });
 });
 
+// ---------------------------------------------------------------------------
+// Bank (unchanged)
+// ---------------------------------------------------------------------------
+
 export const bankInstructions = asyncHandler(async (req, res) => {
   const { paymentId, email, firstName, lastName, phone } = req.body;
   const payment = await Payment.findById(paymentId);
@@ -305,6 +459,10 @@ export const bankInstructions = asyncHandler(async (req, res) => {
 
   ok(res, { paymentId: payment._id, reference, instructions });
 });
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
 
 export const paymentStatus = asyncHandler(async (req, res) => {
   const payment = await Payment.findById(req.params.id).lean();

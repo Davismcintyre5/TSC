@@ -43,6 +43,11 @@ const schema = z.object({
     .default("CustomerPayBillOnline"),
   MPESA_TILL_NUMBER: z.string().default(""),
 
+  PAYSTACK_SECRET_KEY: z.string().min(1),
+  PAYSTACK_PUBLIC_KEY: z.string().default(""),
+  PAYSTACK_CALLBACK_URL: z.string().url(),
+  PAYSTACK_WEBHOOK_URL: z.string().url().optional(),
+
   STRIPE_SECRET_KEY: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
   STRIPE_PUBLISHABLE_KEY: z.string().default(""),
