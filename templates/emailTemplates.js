@@ -134,7 +134,7 @@ export const paymentFailed = ({ matchName, brandName, supportPhone, supportEmail
     title: "Payment failed",
     brandName, supportPhone, supportEmail,
     body: `
-      <p style="margin:0 0 12px;">Your payment for ${matchName} did not go through.</p>
+      <p style="margin:0 0 12px;">Your payment for ${matchName} failed.</p>
       <p style="margin:0;color:${KENYA.muted};font-size:13px;">You can try again at any time. If the amount was deducted, contact support.</p>
     `,
   }),
@@ -159,3 +159,89 @@ export const bankAwaiting = ({ matchName, reference, bank, brandName, supportPho
   }),
   text: `Bank payment for ${matchName} pending. Ref ${reference}.`,
 });
+
+export const adminPaymentPaid = ({
+  matchName,
+  amount,
+  method,
+  reference,
+  mpesaReceipt,
+  buyerName,
+  buyerPhone,
+  buyerEmail,
+  tickets,
+  paymentId,
+  paidAt,
+  brandName,
+  supportPhone,
+  supportEmail,
+}) => {
+  const ticketRows = (tickets || [])
+    .map(
+      (t) => `
+      <tr>
+        <td style="padding:6px 12px 6px 0;color:${KENYA.muted};font-size:13px;">Seat</td>
+        <td style="padding:6px 0;font-size:13px;font-weight:700;">${t.section} · Row ${t.row} · Seat ${t.number}</td>
+      </tr>`
+    )
+    .join("");
+
+  const htmlBody = `
+    <p style="margin:0 0 12px;">A payment was just completed on the site.</p>
+
+    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;font-size:14px;width:100%;">
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};width:120px;">Match</td><td style="font-weight:700;">${matchName}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">Amount</td><td style="font-weight:700;color:${KENYA.green};">KES ${Number(amount).toLocaleString()}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">Method</td><td style="font-weight:700;">${method}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">Reference</td><td style="font-family:monospace;font-size:13px;">${reference || "—"}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">M-Pesa receipt</td><td style="font-family:monospace;font-size:13px;">${mpesaReceipt || "—"}</td></tr>
+    </table>
+
+    <p style="margin:0 0 8px;font-weight:700;color:${KENYA.gold};">Buyer</p>
+    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;font-size:14px;width:100%;">
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};width:120px;">Name</td><td style="font-weight:700;">${buyerName || "—"}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">Phone</td><td>${buyerPhone || "—"}</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:${KENYA.muted};">Email</td><td>${buyerEmail || "—"}</td></tr>
+    </table>
+
+    <p style="margin:0 0 8px;font-weight:700;color:${KENYA.gold};">Tickets (${(tickets || []).length})</p>
+    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;width:100%;">
+      ${ticketRows || `<tr><td style="color:${KENYA.muted};font-size:13px;">—</td></tr>`}
+    </table>
+
+    <p style="margin:0;color:${KENYA.muted};font-size:12px;">
+      Payment ID: <span style="font-family:monospace;">${paymentId}</span><br>
+      Paid at: ${paidAt}
+    </p>
+  `;
+
+  const text = [
+    `Payment received — ${brandName}`,
+    ``,
+    `Match: ${matchName}`,
+    `Amount: KES ${Number(amount).toLocaleString()}`,
+    `Method: ${method}`,
+    `Reference: ${reference || "—"}`,
+    `M-Pesa receipt: ${mpesaReceipt || "—"}`,
+    ``,
+    `Buyer: ${buyerName || "—"}`,
+    `Phone: ${buyerPhone || "—"}`,
+    `Email: ${buyerEmail || "—"}`,
+    ``,
+    `Tickets (${(tickets || []).length}):`,
+    ...(tickets || []).map((t) => `- ${t.section} · Row ${t.row} · Seat ${t.number}`),
+    ``,
+    `Payment ID: ${paymentId}`,
+    `Paid at: ${paidAt}`,
+  ].join("\n");
+
+  return {
+    subject: `[${brandName}] Payment received — KES ${Number(amount).toLocaleString()}`,
+    html: layout({
+      title: "Payment received",
+      brandName, supportPhone, supportEmail,
+      body: htmlBody,
+    }),
+    text,
+  };
+};

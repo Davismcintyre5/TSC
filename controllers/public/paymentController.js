@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger.js";
 import Payment from "../../models/Payment.js";
 import Ticket from "../../models/Ticket.js";
 import PriceCategory from "../../models/PriceCategory.js";
+import Admin from "../../models/Admin.js";
 import * as paystack from "../../services/payments/paystackService.js";
 import * as cardService from "../../services/payments/cardService.js";
 import * as bankService from "../../services/payments/bankService.js";
@@ -38,6 +39,42 @@ const attachBuyer = async (payment, buyer) => {
   );
 };
 
+const notifyAdmins = (payment, tickets) => {
+  Admin.find({ isActive: true })
+    .select("email")
+    .lean()
+    .then((admins) => {
+      if (!admins.length) return;
+      const summary = {
+        matchName: "Bayern Munich vs Ajax",
+        amount: payment.amount,
+        method: payment.method,
+        reference: payment.paystack?.reference || String(payment._id),
+        mpesaReceipt: payment.paystack?.mpesaReceipt || null,
+        buyerName: tickets[0]?.buyer?.name || null,
+        buyerPhone: tickets[0]?.buyer?.phone || null,
+        buyerEmail: tickets[0]?.buyer?.email || null,
+        tickets: tickets.map((t) => ({
+          section: t.seat.section,
+          row: t.seat.row,
+          number: t.seat.number,
+        })),
+        paymentId: String(payment._id),
+        paidAt: new Date().toISOString(),
+      };
+      return Promise.allSettled(
+        admins.map((a) =>
+          emailService.sendAdminPaymentPaid(a.email, summary).catch((err) => {
+            logger.warn({ err: err.message, email: a.email }, "Admin email failed");
+          })
+        )
+      );
+    })
+    .catch((err) => {
+      logger.error({ err: err.message }, "Admin notify lookup failed");
+    });
+};
+
 const finalizePaid = async (payment) => {
   if (payment.status === "paid") return;
   payment.status = "paid";
@@ -62,6 +99,8 @@ const finalizePaid = async (payment) => {
       await smsService.sendTicketReady(ticket.buyer.phone, payload).catch(() => {});
     }
   }
+
+  notifyAdmins(payment, tickets);
 };
 
 // ---------------------------------------------------------------------------
@@ -143,7 +182,7 @@ export const holdTickets = asyncHandler(async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Initiate (Paystack — returns accessCode for Inline popup)
+// Initiate (Paystack)
 // ---------------------------------------------------------------------------
 
 export const mpesaInitiate = asyncHandler(async (req, res) => {
@@ -190,11 +229,10 @@ export const mpesaInitiate = asyncHandler(async (req, res) => {
   });
 });
 
-// Alias for clarity
 export const paystackInitiate = mpesaInitiate;
 
 // ---------------------------------------------------------------------------
-// Webhook (Paystack server-to-server)
+// Webhook
 // ---------------------------------------------------------------------------
 
 export const paystackWebhook = asyncHandler(async (req, res) => {
@@ -240,7 +278,7 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Verify (called by frontend /payment/callback)
+// Verify + callback alias
 // ---------------------------------------------------------------------------
 
 export const paystackVerify = asyncHandler(async (req, res) => {
@@ -277,7 +315,6 @@ export const paystackVerify = asyncHandler(async (req, res) => {
   });
 });
 
-// Callback alias (reads reference from query string, delegates to verify)
 export const paystackCallback = asyncHandler(async (req, res) => {
   const reference = req.query.reference || req.query.trxref;
   if (!reference) throw ApiError.badRequest("reference required", "REFERENCE_REQUIRED");
@@ -286,7 +323,7 @@ export const paystackCallback = asyncHandler(async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Stripe (unchanged)
+// Card (Stripe)
 // ---------------------------------------------------------------------------
 
 export const cardIntent = asyncHandler(async (req, res) => {
@@ -334,7 +371,7 @@ export const cardWebhook = asyncHandler(async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Bank (unchanged)
+// Bank
 // ---------------------------------------------------------------------------
 
 export const bankInstructions = asyncHandler(async (req, res) => {
@@ -359,9 +396,13 @@ export const bankInstructions = asyncHandler(async (req, res) => {
   await payment.save();
 
   if (email) {
-    await emailService.sendBankAwaiting(email, { matchName: "Bayern Munich vs Ajax", reference, bank: instructions }).catch(() => {});
+    await emailService
+      .sendBankAwaiting(email, { matchName: "Bayern Munich vs Ajax", reference, bank: instructions })
+      .catch(() => {});
   } else if (phone) {
-    await smsService.sendBankAwaiting(phone, { matchName: "Bayern Munich vs Ajax", reference }).catch(() => {});
+    await smsService
+      .sendBankAwaiting(phone, { matchName: "Bayern Munich vs Ajax", reference })
+      .catch(() => {});
   }
 
   ok(res, { paymentId: payment._id, reference, instructions });

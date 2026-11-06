@@ -55,3 +55,8 @@ export const sendBankAwaiting = async (to, payload) => {
   const t = await build(tpl.bankAwaiting, payload);
   return send({ to, subject: t.subject, htmlBody: t.html, textBody: t.text });
 };
+
+export const sendAdminPaymentPaid = async (to, payload) => {
+  const t = await build(tpl.adminPaymentPaid, payload);
+  return send({ to, subject: t.subject, htmlBody: t.html, textBody: t.text });
+};
