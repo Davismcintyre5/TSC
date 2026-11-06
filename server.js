@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import env from "./config/env.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import { logger } from "./utils/logger.js";
+import { startKeepAlive, stopKeepAlive } from "./config/keepAlive.js";
 import helmetMiddleware from "./middleware/global/helmet.js";
 import corsMiddleware from "./middleware/global/cors.js";
 import requestLogger from "./middleware/global/requestLogger.js";
@@ -25,6 +26,10 @@ app.set("trust proxy", 1);
 
 app.use(helmetMiddleware);
 app.use(corsMiddleware);
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true, ts: Date.now(), env: env.NODE_ENV });
+});
 
 app.post(
   "/api/payments/card/webhook",
@@ -65,10 +70,13 @@ const start = async () => {
         `API only — app/dist/index.html not found. Run "npm run build" to serve the client.`
       );
     }
+
+    startKeepAlive();
   });
 
   const shutdown = async (signal) => {
     logger.info(`${signal} received, shutting down`);
+    stopKeepAlive();
     server.close(async () => {
       await disconnectDB();
       process.exit(0);
