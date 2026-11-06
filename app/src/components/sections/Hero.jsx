@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useImages } from "../../context/ImagesContext.jsx";
 import { Button } from "../ui/index.js";
@@ -20,18 +21,36 @@ export default function Hero() {
     heroImages.find((i) => i.label === "ajax") ||
     heroImages.find((i) => i.order === 2);
 
+  const [imgLoaded, setImgLoaded] = useState(false);
+
+  useEffect(() => {
+    setImgLoaded(false);
+  }, [background?.url]);
+
   return (
     <section
       id="hero"
       className="relative overflow-hidden border-b border-surface-line min-h-[560px] sm:min-h-[640px] flex items-center"
     >
       {background?.url && (
-        <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${background.url})` }}
-          aria-hidden="true"
-        />
+        <>
+          <div
+            className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-out ${
+              imgLoaded ? "opacity-100" : "opacity-0"
+            }`}
+            style={{ backgroundImage: `url(${background.url})` }}
+            aria-hidden="true"
+          />
+          <img
+            src={background.url}
+            alt=""
+            className="hidden"
+            onLoad={() => setImgLoaded(true)}
+            onError={() => setImgLoaded(true)}
+          />
+        </>
       )}
+
       <div
         className="absolute inset-0 bg-gradient-to-b from-kenya-black/80 via-kenya-black/65 to-kenya-black/95"
         aria-hidden="true"
