@@ -65,51 +65,17 @@ export default function TheStadium() {
               No stadium images yet
             </div>
           ) : (
-            <>
-              {stadiumImages.map((img, i) => (
-                <img
-                  key={img._id}
-                  src={img.url}
-                  alt={img.alt || `Stadium ${i + 1}`}
-                  className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ${
-                    i === index ? "opacity-100" : "opacity-0"
-                  }`}
-                  loading={i === 0 ? "eager" : "lazy"}
-                />
-              ))}
-
-              {total > 1 && (
-                <>
-                  <button
-                    onClick={() => setIndex((i) => (i - 1 + total) % total)}
-                    aria-label="Previous"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-kenya-black/70 text-ink flex items-center justify-center hover:bg-kenya-black"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => setIndex((i) => (i + 1) % total)}
-                    aria-label="Next"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-kenya-black/70 text-ink flex items-center justify-center hover:bg-kenya-black"
-                  >
-                    ›
-                  </button>
-
-                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-                    {stadiumImages.map((_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setIndex(i)}
-                        aria-label={`Go to slide ${i + 1}`}
-                        className={`w-2 h-2 rounded-full transition ${
-                          i === index ? "bg-kenya-gold" : "bg-white/40 hover:bg-white/70"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
+            stadiumImages.map((img, i) => (
+              <img
+                key={img._id}
+                src={img.url}
+                alt={img.alt || `Stadium ${i + 1}`}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
+                  i === index ? "opacity-100" : "opacity-0"
+                }`}
+                loading={i === 0 ? "eager" : "lazy"}
+              />
+            ))
           )}
         </div>
       </div>
