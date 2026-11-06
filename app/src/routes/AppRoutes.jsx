@@ -8,6 +8,7 @@ import TicketingTerms from "../pages/TicketingTerms.jsx";
 import Login from "../pages/Login.jsx";
 import Seats from "../pages/Seats.jsx";
 import Checkout from "../pages/Checkout.jsx";
+import PaymentCallback from "../pages/PaymentCallback.jsx";
 import PaymentStatus from "../pages/PaymentStatus.jsx";
 import MyTickets from "../pages/MyTickets.jsx";
 import NotifyConfirm from "../pages/NotifyConfirm.jsx";
@@ -24,7 +25,11 @@ export default function AppRoutes() {
         <Route path="login" element={<Login />} />
         <Route path="events/:slug/seats" element={<Seats />} />
         <Route path="checkout" element={<Checkout />} />
+
+        {/* Must come before payment/:id — otherwise "callback" is treated as an id */}
+        <Route path="payment/callback" element={<PaymentCallback />} />
         <Route path="payment/:id" element={<PaymentStatus />} />
+
         <Route path="notify/confirm" element={<NotifyConfirm />} />
         <Route
           path="tickets"

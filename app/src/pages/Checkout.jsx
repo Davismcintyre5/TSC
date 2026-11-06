@@ -85,15 +85,10 @@ export default function Checkout() {
           lastName
         );
 
-        const accessCode =
-          r?.data?.data?.accessCode ||
-          r?.data?.accessCode ||
-          r?.accessCode;
-
-        const redirectUrl =
-          r?.data?.data?.authorizationUrl ||
-          r?.data?.authorizationUrl ||
-          r?.authorizationUrl;
+        // Response may be nested depending on the api wrapper
+        const payload = r?.data?.data ?? r?.data ?? r;
+        const accessCode = payload?.accessCode;
+        const redirectUrl = payload?.authorizationUrl;
 
         if (!accessCode && !redirectUrl) {
           toast.error("Could not start payment. Please try again.");
@@ -102,8 +97,7 @@ export default function Checkout() {
 
         setMethod("mpesa");
 
-        // Small-screen fallback: use full-page checkout instead of the popup,
-        // because the Paystack modal can be cramped on very narrow viewports.
+        // Small screens: full-page checkout is more reliable than the popup
         const isSmall = window.matchMedia("(max-width: 480px)").matches;
         if (isSmall && redirectUrl) {
           window.location.href = redirectUrl;
@@ -122,7 +116,7 @@ export default function Checkout() {
         const popup = new window.PaystackPop();
         popup.resumeTransaction(accessCode, {
           onSuccess: (transaction) => {
-            nav(`/payment/callback?reference=${transaction.reference}`);
+            nav(`/payment/callback?reference=${transaction.reference}`, { replace: true });
           },
           onCancel: () => {
             toast.error("Payment cancelled.");
@@ -181,7 +175,6 @@ export default function Checkout() {
               <label className="text-sm text-ink-muted block mb-1.5">
                 Phone that will pay
               </label>
-              {/* Stack country selector above phone on very small screens */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <select
                   value={countryCode}
@@ -292,13 +285,12 @@ export default function Checkout() {
           </label>
         </div>
 
-        {/* Desktop summary — sidebar */}
         <aside className="hidden lg:block lg:sticky lg:top-20 h-fit">
           <SummaryCard hold={hold} seats={seats} qty={qty} onSubmit={pay} loading={loading} />
         </aside>
       </form>
 
-      {/* Mobile sticky footer with total + Continue */}
+      {/* Mobile sticky footer */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-surface-line px-4 py-3 flex items-center gap-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
         <div className="flex-1 min-w-0">
           <div className="text-[11px] text-ink-muted">
@@ -308,13 +300,7 @@ export default function Checkout() {
             {money(hold.amount, hold.currency)}
           </div>
         </div>
-        <Button
-          type="button"
-          onClick={pay}
-          loading={loading}
-          size="lg"
-          className="shrink-0"
-        >
+        <Button type="button" onClick={pay} loading={loading} size="lg" className="shrink-0">
           Continue
         </Button>
       </div>
@@ -348,13 +334,7 @@ function SummaryCard({ hold, seats, qty, onSubmit, loading }) {
         <span className="text-kenya-gold">{money(hold.amount, hold.currency)}</span>
       </div>
 
-      <Button
-        type="button"
-        onClick={onSubmit}
-        loading={loading}
-        className="w-full mt-5"
-        size="lg"
-      >
+      <Button type="button" onClick={onSubmit} loading={loading} className="w-full mt-5" size="lg">
         Continue
       </Button>
 

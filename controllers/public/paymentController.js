@@ -5,7 +5,6 @@ import { logger } from "../../utils/logger.js";
 import Payment from "../../models/Payment.js";
 import Ticket from "../../models/Ticket.js";
 import PriceCategory from "../../models/PriceCategory.js";
-import * as mpesa from "../../services/payments/mpesaService.js";
 import * as paystack from "../../services/payments/paystackService.js";
 import * as cardService from "../../services/payments/cardService.js";
 import * as bankService from "../../services/payments/bankService.js";
@@ -23,7 +22,6 @@ const attachBuyer = async (payment, buyer) => {
   const name = `${buyer.firstName || ""} ${buyer.lastName || ""}`.trim();
   const identifier = email || phone;
   const channel = email ? "email" : "sms";
-
   if (!identifier) return;
 
   await Ticket.updateMany(
@@ -41,6 +39,7 @@ const attachBuyer = async (payment, buyer) => {
 };
 
 const finalizePaid = async (payment) => {
+  if (payment.status === "paid") return;
   payment.status = "paid";
   await payment.save();
 
@@ -66,7 +65,7 @@ const finalizePaid = async (payment) => {
 };
 
 // ---------------------------------------------------------------------------
-// Tickets
+// Hold
 // ---------------------------------------------------------------------------
 
 export const holdTickets = asyncHandler(async (req, res) => {
@@ -101,14 +100,8 @@ export const holdTickets = asyncHandler(async (req, res) => {
     const baseRow = explicit?.row || "12";
 
     for (let q = 0; q < qty; q++) {
-      const seatNumber = startNumber
-        ? String(startNumber + q)
-        : String(fallbackCounter + q);
-
-      const serial = `TSC-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)
-        .toUpperCase()}`;
+      const seatNumber = startNumber ? String(startNumber + q) : String(fallbackCounter + q);
+      const serial = `TSC-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
       const ticket = await Ticket.create({
         categoryId: cat._id,
@@ -123,7 +116,6 @@ export const holdTickets = asyncHandler(async (req, res) => {
       });
       held.push(ticket);
     }
-
     fallbackCounter += qty;
   }
 
@@ -144,18 +136,14 @@ export const holdTickets = asyncHandler(async (req, res) => {
     amount: total,
     currency: "KES",
     ticketIds: held.map((t) => t._id),
-    seats: held.map((t) => ({
-      section: t.seat.section,
-      row: t.seat.row,
-      number: t.seat.number,
-    })),
+    seats: held.map((t) => ({ section: t.seat.section, row: t.seat.row, number: t.seat.number })),
     gate,
     holdExpiresAt: holdUntil,
   });
 });
 
 // ---------------------------------------------------------------------------
-// M-Pesa — fulfilled by Paystack (returns authorizationUrl for frontend redirect)
+// Initiate (Paystack — returns accessCode for Inline popup)
 // ---------------------------------------------------------------------------
 
 export const mpesaInitiate = asyncHandler(async (req, res) => {
@@ -180,7 +168,7 @@ export const mpesaInitiate = asyncHandler(async (req, res) => {
     metadata: { paymentId: String(payment._id) },
   });
 
-  if (!result.success || !result.authorizationUrl) {
+  if (!result.success) {
     payment.status = "failed";
     await payment.save();
     throw ApiError.badRequest("Payment request failed", "PAYSTACK_FAILED", result.error);
@@ -197,23 +185,21 @@ export const mpesaInitiate = asyncHandler(async (req, res) => {
   ok(res, {
     paymentId: payment._id,
     reference: result.reference,
-    authorizationUrl: result.authorizationUrl, // frontend redirects here
     accessCode: result.accessCode,
+    authorizationUrl: result.authorizationUrl,
   });
 });
 
-// Kept for backward compat if anything calls it
+// Alias for clarity
 export const paystackInitiate = mpesaInitiate;
 
 // ---------------------------------------------------------------------------
-// Paystack webhook (server-to-server confirmation)
+// Webhook (Paystack server-to-server)
 // ---------------------------------------------------------------------------
 
 export const paystackWebhook = asyncHandler(async (req, res) => {
   const signature = req.get("x-paystack-signature");
-  const rawBody = req.rawBody;
-
-  if (!paystack.verifyWebhookSignature(rawBody, signature)) {
+  if (!paystack.verifyWebhookSignature(req.rawBody, signature)) {
     logger.warn({ signature }, "Paystack webhook signature invalid");
     return res.status(401).json({ success: false, message: "Invalid signature" });
   }
@@ -228,23 +214,13 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
   try {
     if (parsed.event === "charge.success") {
       const paymentId = parsed.metadata?.paymentId;
-      if (!paymentId) {
-        logger.warn({ reference: parsed.reference }, "Paystack webhook: missing metadata.paymentId");
-        return;
-      }
+      if (!paymentId) return;
 
       const payment = await Payment.findById(paymentId);
-      if (!payment) {
-        logger.warn({ paymentId }, "Paystack webhook: payment not found");
-        return;
-      }
-      if (payment.status === "paid") return;
+      if (!payment || payment.status === "paid") return;
 
       const verify = await paystack.verifyTransaction(parsed.reference);
-      if (!verify.success || verify.status !== "success") {
-        logger.warn({ reference: parsed.reference }, "Paystack verify not success");
-        return;
-      }
+      if (!verify.success || verify.status !== "success") return;
 
       payment.paystack = {
         ...(payment.paystack || {}),
@@ -253,25 +229,18 @@ export const paystackWebhook = asyncHandler(async (req, res) => {
         paidAt: new Date(),
       };
       await finalizePaid(payment);
-
       logger.info({ paymentId, reference: parsed.reference }, "Paystack paid");
     } else if (parsed.event === "charge.failed") {
       const paymentId = parsed.metadata?.paymentId;
-      if (paymentId) {
-        await Payment.findByIdAndUpdate(paymentId, { status: "failed" });
-      }
+      if (paymentId) await Payment.findByIdAndUpdate(paymentId, { status: "failed" });
     }
   } catch (err) {
-    logger.error(
-      { err: err.message, reference: parsed.reference },
-      "Paystack webhook post-processing error"
-    );
+    logger.error({ err: err.message, reference: parsed.reference }, "Paystack webhook error");
   }
 });
 
 // ---------------------------------------------------------------------------
-// Paystack verify (called by frontend /payment/callback)
-// Self-heals: if Paystack says success but DB still pending, fulfil now.
+// Verify (called by frontend /payment/callback)
 // ---------------------------------------------------------------------------
 
 export const paystackVerify = asyncHandler(async (req, res) => {
@@ -308,6 +277,14 @@ export const paystackVerify = asyncHandler(async (req, res) => {
   });
 });
 
+// Callback alias (reads reference from query string, delegates to verify)
+export const paystackCallback = asyncHandler(async (req, res) => {
+  const reference = req.query.reference || req.query.trxref;
+  if (!reference) throw ApiError.badRequest("reference required", "REFERENCE_REQUIRED");
+  req.params.reference = reference;
+  return paystackVerify(req, res);
+});
+
 // ---------------------------------------------------------------------------
 // Stripe (unchanged)
 // ---------------------------------------------------------------------------
@@ -341,10 +318,8 @@ export const cardWebhook = asyncHandler(async (req, res) => {
     if (paymentId) {
       const payment = await Payment.findById(paymentId);
       if (payment && payment.status !== "paid") {
-        payment.card.last4 =
-          event.data.object.charges?.data?.[0]?.payment_method_details?.card?.last4 || null;
-        payment.card.brand =
-          event.data.object.charges?.data?.[0]?.payment_method_details?.card?.brand || null;
+        payment.card.last4 = event.data.object.charges?.data?.[0]?.payment_method_details?.card?.last4 || null;
+        payment.card.brand = event.data.object.charges?.data?.[0]?.payment_method_details?.card?.brand || null;
         await finalizePaid(payment);
       }
     }
@@ -352,9 +327,7 @@ export const cardWebhook = asyncHandler(async (req, res) => {
 
   if (event.type === "payment_intent.payment_failed") {
     const paymentId = event.data.object.metadata?.paymentId;
-    if (paymentId) {
-      await Payment.findByIdAndUpdate(paymentId, { status: "failed" });
-    }
+    if (paymentId) await Payment.findByIdAndUpdate(paymentId, { status: "failed" });
   }
 
   res.json({ received: true });
@@ -386,17 +359,9 @@ export const bankInstructions = asyncHandler(async (req, res) => {
   await payment.save();
 
   if (email) {
-    await emailService
-      .sendBankAwaiting(email, {
-        matchName: "Bayern Munich vs Ajax",
-        reference,
-        bank: instructions,
-      })
-      .catch(() => {});
+    await emailService.sendBankAwaiting(email, { matchName: "Bayern Munich vs Ajax", reference, bank: instructions }).catch(() => {});
   } else if (phone) {
-    await smsService
-      .sendBankAwaiting(phone, { matchName: "Bayern Munich vs Ajax", reference })
-      .catch(() => {});
+    await smsService.sendBankAwaiting(phone, { matchName: "Bayern Munich vs Ajax", reference }).catch(() => {});
   }
 
   ok(res, { paymentId: payment._id, reference, instructions });
@@ -407,8 +372,14 @@ export const bankInstructions = asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 
 export const paymentStatus = asyncHandler(async (req, res) => {
-  const payment = await Payment.findById(req.params.id).lean();
+  const { id } = req.params;
+  if (!/^[a-f0-9]{24}$/i.test(id)) {
+    throw ApiError.badRequest("Invalid payment id", "INVALID_PAYMENT_ID");
+  }
+
+  const payment = await Payment.findById(id).lean();
   if (!payment) throw ApiError.notFound("Payment not found");
+
   ok(res, {
     _id: payment._id,
     status: payment.status,
