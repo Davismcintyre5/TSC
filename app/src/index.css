@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 14 17 22;
+  --surface: 22 27 35;
+  --surface-alt: 28 35 48;
+  --surface-line: 42 50 64;
+  --ink: 232 236 242;
+  --ink-muted: 154 164 178;
+}
+
+html:not(.dark) {
+  --bg: 249 250 251;
+  --surface: 255 255 255;
+  --surface-alt: 243 244 246;
+  --surface-line: 226 232 240;
+  --ink: 17 24 39;
+  --ink-muted: 75 85 99;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
+  font-family: Inter, system-ui, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #f5a623;
+  color: #0e1116;
+}
