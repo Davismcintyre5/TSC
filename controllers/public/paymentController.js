@@ -12,6 +12,9 @@ import * as emailService from "../../services/emailService.js";
 import * as smsService from "../../services/smsService.js";
 import { generate as generateQr } from "../../services/qrService.js";
 
+const GATES = ["A", "B", "C", "D", "E", "F", "G", "H"];
+const randomGate = () => GATES[Math.floor(Math.random() * GATES.length)];
+
 const attachBuyer = async (payment, buyer) => {
   if (!buyer) return;
   const email = (buyer.email || "").trim().toLowerCase();
@@ -75,6 +78,7 @@ export const holdTickets = asyncHandler(async (req, res) => {
   const held = [];
   let total = 0;
   const holdUntil = new Date(Date.now() + 15 * 60 * 1000);
+  const gate = randomGate();
   let fallbackCounter = 1;
 
   for (const item of items) {
@@ -108,7 +112,7 @@ export const holdTickets = asyncHandler(async (req, res) => {
         price: cat.price,
         currency: cat.currency,
         qrCode: "",
-        gate: "A",
+        gate,
         status: "held",
         holdExpiresAt: holdUntil,
       });
@@ -140,6 +144,7 @@ export const holdTickets = asyncHandler(async (req, res) => {
       row: t.seat.row,
       number: t.seat.number,
     })),
+    gate,
     holdExpiresAt: holdUntil,
   });
 });

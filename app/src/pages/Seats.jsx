@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getCategories } from "../api/match.js";
+import { getCategories, getLevels } from "../api/match.js";
 import { holdTickets } from "../api/payments.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePayment } from "../context/PaymentContext.jsx";
@@ -8,11 +8,7 @@ import { useToast } from "../components/ui/Toast.jsx";
 import { Button, Spinner } from "../components/ui/index.js";
 import { money } from "../utils/format.js";
 
-const LEVELS = [
-  { key: "L1", label: "Level 1" },
-  { key: "L2", label: "Level 2" },
-  { key: "L3", label: "Level 3" },
-];
+const LEVEL_ORDER = ["L1", "L2", "L3", "gold", "platinum", "skybox", "accessible"];
 
 const SECTIONS_BY_LEVEL = {
   L1: ["101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128"],
@@ -23,16 +19,6 @@ const SECTIONS_BY_LEVEL = {
 const ROWS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"];
 const SEATS = Array.from({ length: 30 }, (_, i) => String(i + 1));
 
-const SECTIONS_LIST = [
-  { level: "L1", title: "Level 1", range: "Sections 101–128", count: "28 sections", seats: 142, from: 15000, status: "available" },
-  { level: "L2", title: "Level 2", range: "Sections 201–220", count: "20 sections", seats: 1692, from: 20000, status: "available" },
-  { level: "L3", title: "Level 3", range: "Sections 401–435", count: "36 sections", status: "soon" },
-  { level: "gold", title: "Gold", count: "5 sections", status: "soon" },
-  { level: "plat", title: "Platinum", count: "5 sections", seats: 89, status: "available" },
-  { level: "sky", title: "Skyboxes", range: "Boxes 301–350", count: "58 sections", status: "soon" },
-  { level: "acc", title: "Accessible", count: "28 sections", status: "soon" },
-];
-
 export default function Seats() {
   const { slug } = useParams();
   const nav = useNavigate();
@@ -40,53 +26,76 @@ export default function Seats() {
   const { isAuthed } = useAuth();
   const { setHold } = usePayment();
 
+  const [levels, setLevels] = useState([]);
+  const [activeLevel, setActiveLevel] = useState("L1");
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [level, setLevel] = useState("L1");
   const [selected, setSelected] = useState(null);
-  const [quantity, setQuantity] = useState(2);
+  const [quantity, setQuantity] = useState(1);
   const [zoom, setZoom] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [catsLoading, setCatsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [continuing, setContinuing] = useState(false);
 
-  const [pickLevel, setPickLevel] = useState("L1");
   const [pickSection, setPickSection] = useState("101");
   const [pickRow, setPickRow] = useState("1");
   const [pickSeat, setPickSeat] = useState("1");
 
   useEffect(() => {
-    getCategories()
+    getLevels()
       .then((r) => {
         const list = r?.data ?? r ?? [];
-        const rows = Array.isArray(list) ? list : [];
-        setCategories(rows);
-        const first = rows.find((c) => c.isActive !== false && c.seatsLeft !== 0);
-        if (first) setSelected(first._id);
+        setLevels(Array.isArray(list) ? list : []);
+        const firstActive = (list || []).find((l) => l.status === "available");
+        if (firstActive) setActiveLevel(firstActive.level);
       })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!activeLevel) return;
+    setCatsLoading(true);
+    getCategories(activeLevel)
+      .then((r) => {
+        const list = r?.data ?? r ?? [];
+        const rows = Array.isArray(list) ? list : [];
+        setCategories(rows);
+        const first = rows.find((c) => c.seatsLeft !== 0);
+        setSelected(first?._id || null);
+      })
+      .catch((e) => toast.error(e.message))
+      .finally(() => setCatsLoading(false));
+  }, [activeLevel]);
+
   const cat = categories.find((c) => c._id === selected);
   const total = cat ? cat.price * quantity : 0;
 
   const sectionsForLevel = useMemo(
-    () => SECTIONS_BY_LEVEL[pickLevel] || [],
-    [pickLevel]
+    () => SECTIONS_BY_LEVEL[activeLevel] || [],
+    [activeLevel]
   );
 
   useEffect(() => {
-    if (!sectionsForLevel.includes(pickSection)) {
-      setPickSection(sectionsForLevel[0] || "");
+    if (sectionsForLevel.length && !sectionsForLevel.includes(pickSection)) {
+      setPickSection(sectionsForLevel[0]);
     }
-  }, [pickLevel, sectionsForLevel, pickSection]);
+  }, [sectionsForLevel, pickSection]);
 
   const startNumber = Number(pickSeat);
   const endNumber = startNumber + quantity - 1;
   const seatRangeLabel =
     quantity === 1 ? `Seat ${startNumber}` : `Seats ${startNumber}–${endNumber}`;
 
-  const doHold = async (seatOverride) => {
+  const doHold = async () => {
+    const seatOverride =
+      pickSection && pickRow && pickSeat
+        ? {
+            section: `${activeLevel} · Section ${pickSection}`,
+            row: pickRow,
+            number: pickSeat,
+          }
+        : null;
+
     const payload = {
       items: [
         {
@@ -96,16 +105,23 @@ export default function Seats() {
         },
       ],
     };
+
     const r = await holdTickets(payload);
     setHold(r.data);
     return r.data;
   };
 
-  const submitContinueGeneric = async () => {
+  const submitContinue = async () => {
     if (!cat) return toast.error("Select a ticket first");
+    if (!pickSection || !pickRow || !pickSeat) {
+      return toast.error("Choose section, row and seat");
+    }
+    if (endNumber > 30) {
+      return toast.error(`Not enough seats in row from seat ${startNumber}`);
+    }
     setSubmitting(true);
     try {
-      await doHold(null);
+      await doHold();
       nav("/checkout");
     } catch (err) {
       toast.error(err.message);
@@ -114,35 +130,9 @@ export default function Seats() {
     }
   };
 
-  const submitContinueSpecific = async () => {
-    if (!cat) return toast.error("Select a ticket first");
-    if (!pickSection || !pickRow || !pickSeat) {
-      return toast.error("Choose level, section, row and seat");
-    }
-    if (endNumber > 30) {
-      return toast.error(`Not enough seats in row from seat ${startNumber}`);
-    }
-    setContinuing(true);
-    try {
-      await doHold({
-        section: `${pickLevel} · Section ${pickSection}`,
-        row: pickRow,
-        number: pickSeat,
-      });
-      nav("/checkout");
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setContinuing(false);
-    }
-  };
-
   const findMyTickets = () => {
-    if (isAuthed) {
-      nav("/tickets");
-    } else {
-      nav("/login", { state: { from: "/tickets" } });
-    }
+    if (isAuthed) nav("/tickets");
+    else nav("/login", { state: { from: "/tickets" } });
   };
 
   if (loading) {
@@ -152,6 +142,8 @@ export default function Seats() {
       </div>
     );
   }
+
+  const tabs = LEVEL_ORDER.filter((k) => levels.find((l) => l.level === k));
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8">
@@ -166,22 +158,26 @@ export default function Seats() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="bg-surface border border-surface-line rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between gap-3 p-4 border-b border-surface-line">
-            <div className="flex gap-2">
-              {LEVELS.map((l) => (
+          <div className="flex gap-2 p-4 border-b border-surface-line overflow-x-auto">
+            {tabs.map((key) => {
+              const l = levels.find((x) => x.level === key);
+              const soon = l.status === "soon";
+              return (
                 <button
-                  key={l.key}
-                  onClick={() => setLevel(l.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${
-                    level === l.key
+                  key={key}
+                  onClick={() => setActiveLevel(key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${
+                    activeLevel === key
                       ? "bg-kenya-green text-white"
+                      : soon
+                      ? "bg-surface-alt text-ink-muted/60"
                       : "bg-surface-alt text-ink-muted hover:text-ink"
                   }`}
                 >
-                  {l.label}
+                  {l.title}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
 
           <div className="relative bg-surface-alt aspect-[4/3] overflow-hidden">
@@ -189,7 +185,7 @@ export default function Seats() {
               className="absolute inset-0 flex items-center justify-center transition-transform"
               style={{ transform: `scale(${zoom})` }}
             >
-              <StadiumMap level={level} />
+              <StadiumMap level={activeLevel} />
             </div>
 
             <div className="absolute top-3 right-3 flex flex-col gap-2">
@@ -221,8 +217,12 @@ export default function Seats() {
             </div>
 
             <div className="absolute bottom-3 left-3 bg-surface/90 border border-surface-line rounded-lg px-3 py-2 text-xs">
-              <div className="font-semibold text-ink mb-1">Section 405</div>
-              <div className="text-ink-muted">Available</div>
+              <div className="font-semibold text-ink mb-1">
+                {levels.find((l) => l.level === activeLevel)?.title || ""}
+              </div>
+              <div className="text-ink-muted">
+                {levels.find((l) => l.level === activeLevel)?.range || ""}
+              </div>
             </div>
 
             <div className="absolute bottom-3 right-3 flex flex-col gap-1.5 text-[10px]">
@@ -248,7 +248,7 @@ export default function Seats() {
 
         <aside className="space-y-4">
           <div className="bg-surface border border-surface-line rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-1">
               <h3 className="font-bold">Tickets</h3>
               <div className="flex items-center gap-2">
                 <button
@@ -269,51 +269,58 @@ export default function Seats() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              {categories.length === 0 && (
-                <p className="text-sm text-ink-muted">No categories available.</p>
-              )}
-              {categories.map((c) => {
-                const soldOut = c.isActive === false || c.seatsLeft === 0;
-                return (
-                  <button
-                    key={c._id}
-                    onClick={() => !soldOut && setSelected(c._id)}
-                    disabled={soldOut}
-                    className={`w-full text-left bg-surface-alt border rounded-lg px-3 py-3 transition ${
-                      selected === c._id
-                        ? "border-kenya-gold ring-1 ring-kenya-gold"
-                        : "border-surface-line hover:border-ink-muted"
-                    } ${soldOut ? "opacity-50 cursor-not-allowed" : ""}`}
-                  >
-                    <div className="flex justify-between items-baseline gap-3">
-                      <div className="font-semibold text-sm">
-                        {c.name}
-                        {c.section ? (
-                          <span className="text-ink-muted font-normal"> · {c.section}</span>
-                        ) : null}
+            <p className="text-xs text-ink-muted mb-4">
+              {levels.find((l) => l.level === activeLevel)?.title || ""} ·{" "}
+              {levels.find((l) => l.level === activeLevel)?.range || ""}
+            </p>
+
+            {catsLoading ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-ink-muted">
+                <Spinner size={16} /> Loading…
+              </div>
+            ) : categories.length === 0 ? (
+              <p className="text-sm text-ink-muted py-4">
+                No ticket categories on sale for this level yet.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {categories.map((c) => {
+                  const soldOut = c.seatsLeft === 0;
+                  return (
+                    <button
+                      key={c._id}
+                      onClick={() => !soldOut && setSelected(c._id)}
+                      disabled={soldOut}
+                      className={`w-full text-left bg-surface-alt border rounded-lg px-3 py-3 transition ${
+                        selected === c._id
+                          ? "border-kenya-gold ring-1 ring-kenya-gold"
+                          : "border-surface-line hover:border-ink-muted"
+                      } ${soldOut ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      <div className="flex justify-between items-baseline gap-3">
+                        <div className="font-semibold text-sm">{c.name}</div>
+                        <div className="text-right">
+                          {soldOut ? (
+                            <div className="text-xs text-kenya-red font-semibold">Sold out</div>
+                          ) : (
+                            <>
+                              <div className="font-extrabold text-kenya-gold text-sm">
+                                {money(c.price, c.currency)}
+                              </div>
+                              <div className="text-[10px] text-ink-muted">
+                                {c.seatsLeft == null
+                                  ? "Available"
+                                  : `${c.seatsLeft.toLocaleString()} seats left`}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        {soldOut ? (
-                          <div className="text-xs text-kenya-red font-semibold">Sold out</div>
-                        ) : (
-                          <>
-                            <div className="font-extrabold text-kenya-gold text-sm">
-                              {money(c.price, c.currency)}
-                            </div>
-                            <div className="text-[10px] text-ink-muted">
-                              {c.seatsLeft == null
-                                ? "Available"
-                                : `${c.seatsLeft.toLocaleString()} seats left`}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {cat && (
               <div className="mt-4 pt-4 border-t border-surface-line flex justify-between font-bold">
@@ -321,36 +328,12 @@ export default function Seats() {
                 <span className="text-kenya-gold">{money(total)}</span>
               </div>
             )}
-
-            <div className="mt-4 space-y-2">
-              <Button
-                onClick={submitContinueGeneric}
-                loading={submitting}
-                disabled={!cat}
-                className="w-full"
-                size="lg"
-              >
-                Continue
-              </Button>
-              <Button
-                onClick={findMyTickets}
-                variant="ghost"
-                className="w-full"
-              >
-                Find my tickets
-              </Button>
-            </div>
           </div>
 
           <div className="bg-surface border border-surface-line rounded-xl p-5">
             <h3 className="font-bold text-sm mb-3">Choose a specific seat</h3>
+
             <div className="grid grid-cols-2 gap-3">
-              <Select
-                label="Level"
-                value={pickLevel}
-                onChange={setPickLevel}
-                options={LEVELS.map((l) => ({ value: l.key, label: l.label }))}
-              />
               <Select
                 label="Section"
                 value={pickSection}
@@ -372,76 +355,82 @@ export default function Seats() {
             </div>
 
             <div className="mt-3 text-xs text-ink-muted">
-              {pickLevel} · Section {pickSection} · Row {pickRow} · {seatRangeLabel}
+              {activeLevel} · Section {pickSection} · Row {pickRow} · {seatRangeLabel}
               {quantity > 1 ? ` (${quantity} consecutive)` : ""}
             </div>
 
             <Button
-              onClick={submitContinueSpecific}
-              loading={continuing}
+              onClick={submitContinue}
+              loading={submitting}
               disabled={!cat}
               className="w-full mt-4"
               size="lg"
             >
-              Continue with these seats
+              Continue
+            </Button>
+
+            <Button
+              onClick={findMyTickets}
+              variant="ghost"
+              className="w-full mt-2"
+            >
+              Find my tickets
             </Button>
           </div>
-
-          <div className="bg-surface border border-surface-line rounded-xl p-5">
-            <div className="flex items-baseline justify-between mb-3">
-              <h3 className="font-bold text-sm">Or choose a section</h3>
-              <span className="text-xs text-ink-muted">10 sections available</span>
-            </div>
-
-            <button className="text-xs text-kenya-gold hover:underline mb-3">
-              Cheapest
-            </button>
-
-            <div className="space-y-2">
-              {SECTIONS_LIST.map((s) => {
-                const soon = s.status === "soon";
-                return (
-                  <div
-                    key={s.level}
-                    className={`bg-surface-alt border border-surface-line rounded-lg px-3 py-3 ${
-                      soon ? "opacity-70" : ""
-                    }`}
-                  >
-                    <div className="flex justify-between items-start gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-sm">{s.title}</div>
-                        {s.range && (
-                          <div className="text-[11px] text-ink-muted">
-                            {s.range} · {s.count}
-                          </div>
-                        )}
-                        {!s.range && (
-                          <div className="text-[11px] text-ink-muted">{s.count}</div>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        {soon ? (
-                          <div className="text-[11px] text-ink-muted">Not yet on sale</div>
-                        ) : (
-                          <>
-                            <div className="text-[11px] text-ink-muted">
-                              {s.seats ?? 0} seats left
-                            </div>
-                            {s.from ? (
-                              <div className="text-xs font-bold text-kenya-gold">
-                                From {money(s.from)}
-                              </div>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         </aside>
+      </div>
+
+      <div className="mt-8">
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="font-bold text-sm">Or choose a section</h3>
+          <span className="text-xs text-ink-muted">
+            {levels.length} levels available
+          </span>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          {levels.map((l) => {
+            const soon = l.status === "soon";
+            const isActive = l.level === activeLevel;
+            return (
+              <button
+                key={l.level}
+                onClick={() => !soon && setActiveLevel(l.level)}
+                disabled={soon}
+                className={`text-left bg-surface border rounded-xl px-4 py-3 transition ${
+                  isActive
+                    ? "border-kenya-gold ring-1 ring-kenya-gold"
+                    : "border-surface-line hover:border-ink-muted"
+                } ${soon ? "opacity-60 cursor-not-allowed" : ""}`}
+              >
+                <div className="flex justify-between items-start gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm text-ink">{l.title}</div>
+                    {l.range && (
+                      <div className="text-[11px] text-ink-muted mt-0.5">{l.range}</div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {soon ? (
+                      <div className="text-[11px] text-ink-muted">Not yet on sale</div>
+                    ) : (
+                      <>
+                        <div className="text-[11px] text-ink-muted">
+                          {l.seatsLeft.toLocaleString()} seats left
+                        </div>
+                        {l.from ? (
+                          <div className="text-xs font-bold text-kenya-gold">
+                            From {money(l.from)}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -468,6 +457,16 @@ function Select({ label, value, onChange, options }) {
 
 function StadiumMap({ level }) {
   const stroke = "rgba(148,163,184,0.25)";
+
+  const ring =
+    level === "L1"
+      ? { rx: 150, ry: 101, count: 28, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
+      : level === "L2"
+      ? { rx: 130, ry: 85, count: 20, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
+      : level === "L3"
+      ? { rx: 110, ry: 68, count: 36, color: "rgba(148,163,184,0.4)", stroke: "rgba(148,163,184,0.6)" }
+      : { rx: 110, ry: 68, count: 16, color: "rgba(245,166,35,0.5)", stroke: "rgba(245,166,35,0.8)" };
+
   return (
     <svg viewBox="0 0 400 300" className="w-full h-full max-w-[560px]">
       <ellipse cx="200" cy="150" rx="160" ry="110" fill="none" stroke={stroke} strokeWidth="1.5" />
@@ -478,36 +477,14 @@ function StadiumMap({ level }) {
       <ellipse cx="200" cy="150" rx="80" ry="42" fill="#22c55e" opacity="0.08" />
       <rect x="140" y="130" width="120" height="40" fill="#22c55e" opacity="0.12" />
 
-      {level === "L1" && (
-        <g fill="rgba(34,197,94,0.5)" stroke="rgba(34,197,94,0.8)" strokeWidth="0.5">
-          {Array.from({ length: 28 }).map((_, i) => {
-            const a = (i / 28) * Math.PI * 2;
-            const x = 200 + Math.cos(a) * 150;
-            const y = 150 + Math.sin(a) * 101;
-            return <circle key={i} cx={x} cy={y} r="4" />;
-          })}
-        </g>
-      )}
-      {level === "L2" && (
-        <g fill="rgba(34,197,94,0.5)" stroke="rgba(34,197,94,0.8)" strokeWidth="0.5">
-          {Array.from({ length: 20 }).map((_, i) => {
-            const a = (i / 20) * Math.PI * 2;
-            const x = 200 + Math.cos(a) * 130;
-            const y = 150 + Math.sin(a) * 85;
-            return <circle key={i} cx={x} cy={y} r="4" />;
-          })}
-        </g>
-      )}
-      {level === "L3" && (
-        <g fill="rgba(148,163,184,0.4)" stroke="rgba(148,163,184,0.6)" strokeWidth="0.5">
-          {Array.from({ length: 36 }).map((_, i) => {
-            const a = (i / 36) * Math.PI * 2;
-            const x = 200 + Math.cos(a) * 110;
-            const y = 150 + Math.sin(a) * 68;
-            return <circle key={i} cx={x} cy={y} r="3" />;
-          })}
-        </g>
-      )}
+      <g fill={ring.color} stroke={ring.stroke} strokeWidth="0.5">
+        {Array.from({ length: ring.count }).map((_, i) => {
+          const a = (i / ring.count) * Math.PI * 2;
+          const x = 200 + Math.cos(a) * ring.rx;
+          const y = 150 + Math.sin(a) * ring.ry;
+          return <circle key={i} cx={x} cy={y} r="4" />;
+        })}
+      </g>
     </svg>
   );
 }

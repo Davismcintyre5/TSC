@@ -2,6 +2,13 @@ import mongoose from "mongoose";
 
 const priceCategorySchema = new mongoose.Schema(
   {
+    level: {
+      type: String,
+      enum: ["L1", "L2", "L3", "gold", "platinum", "skybox", "accessible"],
+      required: true,
+      index: true,
+    },
+    phase: { type: Number, default: 1, index: true },
     name: { type: String, required: true },
     section: { type: String, required: true },
     price: { type: Number, required: true, min: 0 },
@@ -14,6 +21,7 @@ const priceCategorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-priceCategorySchema.index({ order: 1 });
+priceCategorySchema.index({ level: 1, phase: 1, order: 1 });
+priceCategorySchema.index({ level: 1, phase: 1, name: 1 }, { unique: true });
 
 export default mongoose.model("PriceCategory", priceCategorySchema);

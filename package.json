@@ -17,6 +17,7 @@
     "build:app": "npm --prefix app run build"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.0",
     "axios": "^1.7.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.5.1",
@@ -29,6 +30,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.6.0",
     "morgan": "^1.10.0",
+    "pdfkit": "^0.20.2",
     "pino": "^9.3.0",
     "qrcode": "^1.5.4",
     "stripe": "^16.9.0",

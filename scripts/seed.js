@@ -74,15 +74,28 @@ const seedMatch = async () => {
 
 const seedCategories = async () => {
   const rows = [
-    { name: "Regular", section: "General", price: 2500, tier: "regular", order: 1, capacity: 142 },
-    { name: "Mid-range A", section: "Section B", price: 3500, tier: "mid", order: 2, capacity: 0 },
-    { name: "Mid-range B", section: "Section C", price: 5000, tier: "mid", order: 3, capacity: 0 },
-    { name: "Premium", section: "VIP", price: 20000, tier: "premium", order: 4, capacity: 1692 },
+    { level: "L1", phase: 1, name: "Phase 1 - 2,500", section: "Level 1", price: 2500, tier: "regular", order: 1, capacity: 0, isActive: false },
+    { level: "L1", phase: 1, name: "Phase 1 - 3,500", section: "Level 1", price: 3500, tier: "regular", order: 2, capacity: 0, isActive: false },
+    { level: "L1", phase: 1, name: "Phase 1 - 5,000", section: "Level 1", price: 5000, tier: "mid", order: 3, capacity: 0, isActive: false },
+    { level: "L1", phase: 1, name: "Phase 1 - 15,000", section: "Level 1", price: 15000, tier: "mid", order: 4, capacity: 500, isActive: true },
+
+    { level: "L2", phase: 1, name: "Phase 1 - 5,000", section: "Level 2", price: 5000, tier: "regular", order: 1, capacity: 0, isActive: false },
+    { level: "L2", phase: 1, name: "Phase 1 - 20,000", section: "Level 2", price: 20000, tier: "mid", order: 2, capacity: 1692, isActive: true },
+
+    { level: "L3", phase: 1, name: "Phase 1 - 3,500", section: "Level 3", price: 3500, tier: "regular", order: 1, capacity: 0, isActive: false },
+
+    { level: "gold", phase: 1, name: "Gold", section: "Gold", price: 12000, tier: "premium", order: 1, capacity: 0, isActive: false },
+
+    { level: "platinum", phase: 1, name: "Phase 1 - Platinum", section: "Platinum", price: 20000, tier: "premium", order: 1, capacity: 89, isActive: true },
+
+    { level: "skybox", phase: 1, name: "Skybox", section: "Skyboxes", price: 0, tier: "premium", order: 1, capacity: 0, isActive: false },
+
+    { level: "accessible", phase: 1, name: "Accessible", section: "Accessible", price: 2500, tier: "regular", order: 1, capacity: 0, isActive: false },
   ];
 
   for (const row of rows) {
     await PriceCategory.updateOne(
-      { name: row.name },
+      { level: row.level, phase: row.phase, name: row.name },
       {
         $set: {
           section: row.section,
@@ -90,8 +103,8 @@ const seedCategories = async () => {
           tier: row.tier,
           order: row.order,
           capacity: row.capacity,
+          isActive: row.isActive,
           currency: "KES",
-          isActive: true,
         },
       },
       { upsert: true }
@@ -237,7 +250,6 @@ const seedSettings = async () => {
   for (const row of rows) {
     const upsert =
       row.group === "social" ? { $set: row } : { $setOnInsert: row };
-
     await Setting.updateOne({ key: row.key }, upsert, { upsert: true });
   }
   ok(`Settings: ${rows.length} upserted`);
