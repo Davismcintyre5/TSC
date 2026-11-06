@@ -18,6 +18,17 @@ const METHODS = [
   { key: "card", label: "Card", hint: "Visa, Mastercard or Amex", icon: "C" },
 ];
 
+const isMobileDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua)) return true;
+  // Touch devices with narrow viewport (catches some tablets in mobile mode)
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(max-width: 768px) and (pointer: coarse)").matches;
+  }
+  return false;
+};
+
 export default function Checkout() {
   const nav = useNavigate();
   const toast = useToast();
@@ -85,7 +96,6 @@ export default function Checkout() {
           lastName
         );
 
-        // Response may be nested depending on the api wrapper
         const payload = r?.data?.data ?? r?.data ?? r;
         const accessCode = payload?.accessCode;
         const redirectUrl = payload?.authorizationUrl;
@@ -97,13 +107,17 @@ export default function Checkout() {
 
         setMethod("mpesa");
 
-        // Small screens: full-page checkout is more reliable than the popup
-        const isSmall = window.matchMedia("(max-width: 480px)").matches;
-        if (isSmall && redirectUrl) {
-          window.location.href = redirectUrl;
+        // Mobile: full-page redirect is the only reliable way to render Paystack checkout
+        if (isMobileDevice()) {
+          if (redirectUrl) {
+            window.location.href = redirectUrl;
+            return;
+          }
+          toast.error("Could not open checkout. Please try again.");
           return;
         }
 
+        // Desktop/tablet: use Paystack Inline popup
         if (typeof window.PaystackPop === "undefined") {
           if (redirectUrl) {
             window.location.href = redirectUrl;
