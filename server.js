@@ -6,6 +6,7 @@ import env from "./config/env.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import { logger } from "./utils/logger.js";
 import helmetMiddleware from "./middleware/global/helmet.js";
+import corsMiddleware from "./middleware/global/cors.js";
 import requestLogger from "./middleware/global/requestLogger.js";
 import { baseLimiter } from "./middleware/global/rateLimit.js";
 import botProtection from "./middleware/global/botProtection.js";
@@ -23,6 +24,7 @@ const app = express();
 app.set("trust proxy", 1);
 
 app.use(helmetMiddleware);
+app.use(corsMiddleware);
 
 app.post(
   "/api/payments/card/webhook",

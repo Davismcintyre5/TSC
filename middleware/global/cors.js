@@ -1,8 +1,14 @@
 import cors from "cors";
 import env from "../../config/env.js";
 
+const allowed = [env.ADMIN_ORIGIN].filter(Boolean);
+
 const corsMiddleware = cors({
-  origin: [env.APP_ORIGIN, env.ADMIN_ORIGIN],
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowed.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
