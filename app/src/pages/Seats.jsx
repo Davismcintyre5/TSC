@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { usePayment } from "../context/PaymentContext.jsx";
 import { useToast } from "../components/ui/Toast.jsx";
 import { Button, Spinner } from "../components/ui/index.js";
+import StadiumMap from "../components/svg/StadiumMap.jsx";
 import { money } from "../utils/format.js";
 
 const LEVEL_ORDER = ["L1", "L2", "L3", "gold", "platinum", "skybox", "accessible"];
@@ -518,39 +519,5 @@ function Select({ label, value, onChange, options, disabled = false }) {
         )}
       </select>
     </label>
-  );
-}
-
-function StadiumMap({ level }) {
-  const stroke = "rgba(148,163,184,0.25)";
-
-  const ring =
-    level === "L1"
-      ? { rx: 150, ry: 101, count: 28, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
-      : level === "L2"
-      ? { rx: 130, ry: 85, count: 20, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
-      : level === "L3"
-      ? { rx: 110, ry: 68, count: 36, color: "rgba(148,163,184,0.4)", stroke: "rgba(148,163,184,0.6)" }
-      : { rx: 110, ry: 68, count: 16, color: "rgba(245,166,35,0.5)", stroke: "rgba(245,166,35,0.8)" };
-
-  return (
-    <svg viewBox="0 0 400 300" className="w-full h-full max-w-[560px]">
-      <ellipse cx="200" cy="150" rx="160" ry="110" fill="none" stroke={stroke} strokeWidth="1.5" />
-      <ellipse cx="200" cy="150" rx="140" ry="92" fill="none" stroke={stroke} strokeWidth="1" />
-      <ellipse cx="200" cy="150" rx="120" ry="74" fill="none" stroke={stroke} strokeWidth="1" />
-      <ellipse cx="200" cy="150" rx="100" ry="56" fill="none" stroke={stroke} strokeWidth="1" />
-
-      <ellipse cx="200" cy="150" rx="80" ry="42" fill="#22c55e" opacity="0.08" />
-      <rect x="140" y="130" width="120" height="40" fill="#22c55e" opacity="0.12" />
-
-      <g fill={ring.color} stroke={ring.stroke} strokeWidth="0.5">
-        {Array.from({ length: ring.count }).map((_, i) => {
-          const a = (i / ring.count) * Math.PI * 2;
-          const x = 200 + Math.cos(a) * ring.rx;
-          const y = 150 + Math.sin(a) * ring.ry;
-          return <circle key={i} cx={x} cy={y} r="4" />;
-        })}
-      </g>
-    </svg>
   );
 }
