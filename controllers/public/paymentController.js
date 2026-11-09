@@ -142,18 +142,28 @@ export const holdTickets = asyncHandler(async (req, res) => {
       const seatNumber = startNumber ? String(startNumber + q) : String(fallbackCounter + q);
       const serial = `TSC-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
-      const ticket = await Ticket.create({
-        categoryId: cat._id,
-        serial,
-        seat: { section: baseSection, row: baseRow, number: seatNumber },
-        price: cat.price,
-        currency: cat.currency,
-        qrCode: "",
-        gate,
-        status: "held",
-        holdExpiresAt: holdUntil,
-      });
-      held.push(ticket);
+      try {
+        const ticket = await Ticket.create({
+          categoryId: cat._id,
+          serial,
+          seat: { section: baseSection, row: baseRow, number: seatNumber },
+          price: cat.price,
+          currency: cat.currency,
+          qrCode: "",
+          gate,
+          status: "held",
+          holdExpiresAt: holdUntil,
+        });
+        held.push(ticket);
+      } catch (err) {
+        if (err.code === 11000) {
+          throw ApiError.conflict(
+            `Seat ${seatNumber} in ${baseSection} row ${baseRow} is no longer available`,
+            "SEAT_UNAVAILABLE"
+          );
+        }
+        throw err;
+      }
     }
     fallbackCounter += qty;
   }

@@ -44,7 +44,21 @@ const ticketSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-ticketSchema.index({ "seat.section": 1, "seat.row": 1, "seat.number": 1 });
 ticketSchema.index({ "buyer.identifier": 1, status: 1 });
+
+ticketSchema.index(
+  {
+    "seat.section": 1,
+    "seat.row": 1,
+    "seat.number": 1,
+    status: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ["held", "paid", "used"] },
+    },
+  }
+);
 
 export default mongoose.model("Ticket", ticketSchema);

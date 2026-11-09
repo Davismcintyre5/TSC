@@ -6,6 +6,7 @@ import env from "./config/env.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import { logger } from "./utils/logger.js";
 import { startKeepAlive, stopKeepAlive } from "./config/keepAlive.js";
+import { startSchedulers, stopSchedulers } from "./schedulers/index.js";
 import helmetMiddleware from "./middleware/global/helmet.js";
 import corsMiddleware from "./middleware/global/cors.js";
 import requestLogger from "./middleware/global/requestLogger.js";
@@ -72,10 +73,12 @@ const start = async () => {
     }
 
     startKeepAlive();
+    startSchedulers();
   });
 
   const shutdown = async (signal) => {
     logger.info(`${signal} received, shutting down`);
+    stopSchedulers();
     stopKeepAlive();
     server.close(async () => {
       await disconnectDB();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getCategories, getLevels } from "../api/match.js";
+import { getCategories, getLevels, getSeats } from "../api/match.js";
 import { holdTickets } from "../api/payments.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { usePayment } from "../context/PaymentContext.jsx";
@@ -14,10 +14,13 @@ const SECTIONS_BY_LEVEL = {
   L1: ["101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128"],
   L2: ["201", "202", "203", "204", "205", "206", "207", "208", "209", "210", "211", "212", "213", "214", "215", "216", "217", "218", "219", "220"],
   L3: ["401", "402", "403", "404", "405", "406", "407", "408", "409", "410", "411", "412", "413", "414", "415"],
+  gold: ["1", "2", "3", "4", "5"],
+  platinum: ["1", "2", "3", "4", "5"],
+  skybox: Array.from({ length: 58 }, (_, i) => String(301 + i)),
+  accessible: Array.from({ length: 28 }, (_, i) => String(i + 1)),
 };
 
 const ROWS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"];
-const SEATS = Array.from({ length: 30 }, (_, i) => String(i + 1));
 
 export default function Seats() {
   const { slug } = useParams();
@@ -38,7 +41,10 @@ export default function Seats() {
 
   const [pickSection, setPickSection] = useState("101");
   const [pickRow, setPickRow] = useState("1");
-  const [pickSeat, setPickSeat] = useState("1");
+  const [pickSeat, setPickSeat] = useState("");
+
+  const [availableSeats, setAvailableSeats] = useState([]);
+  const [seatsLoading, setSeatsLoading] = useState(false);
 
   useEffect(() => {
     getLevels()
@@ -81,21 +87,51 @@ export default function Seats() {
     }
   }, [sectionsForLevel, pickSection]);
 
+  useEffect(() => {
+    if (!activeLevel || !pickSection || !pickRow) return;
+    let alive = true;
+    setSeatsLoading(true);
+    getSeats(activeLevel, pickSection, pickRow)
+      .then((r) => {
+        if (!alive) return;
+        const list = r?.data ?? r;
+        const avail = list?.available || [];
+        setAvailableSeats(avail);
+        setPickSeat((prev) => (avail.includes(prev) ? prev : avail[0] || ""));
+      })
+      .catch(() => alive && setAvailableSeats([]))
+      .finally(() => alive && setSeatsLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [activeLevel, pickSection, pickRow]);
+
   const startNumber = Number(pickSeat);
   const endNumber = startNumber + quantity - 1;
-  const seatRangeLabel =
-    quantity === 1 ? `Seat ${startNumber}` : `Seats ${startNumber}–${endNumber}`;
 
-  const doHold = async () => {
-    const seatOverride =
-      pickSection && pickRow && pickSeat
-        ? {
-            section: `${activeLevel} · Section ${pickSection}`,
-            row: pickRow,
-            number: pickSeat,
-          }
-        : null;
+  const neededSeats = useMemo(() => {
+    if (!pickSeat) return [];
+    return Array.from({ length: quantity }, (_, i) =>
+      String(Number(pickSeat) + i)
+    );
+  }, [pickSeat, quantity]);
 
+  const missingSeats = useMemo(
+    () => neededSeats.filter((n) => !availableSeats.includes(n)),
+    [neededSeats, availableSeats]
+  );
+
+  const seatRangeLabel = seatsLoading
+    ? "Loading seats…"
+    : !pickSeat
+    ? "No seats available in this row"
+    : quantity === 1
+    ? `Seat ${pickSeat}`
+    : missingSeats.length
+    ? `Seats ${pickSeat}–${endNumber} (${missingSeats.length} unavailable)`
+    : `Seats ${pickSeat}–${endNumber}`;
+
+  const doHold = async (seatOverride) => {
     const payload = {
       items: [
         {
@@ -105,7 +141,6 @@ export default function Seats() {
         },
       ],
     };
-
     const r = await holdTickets(payload);
     setHold(r.data);
     return r.data;
@@ -113,15 +148,19 @@ export default function Seats() {
 
   const submitContinue = async () => {
     if (!cat) return toast.error("Select a ticket first");
-    if (!pickSection || !pickRow || !pickSeat) {
-      return toast.error("Choose section, row and seat");
-    }
-    if (endNumber > 30) {
-      return toast.error(`Not enough seats in row from seat ${startNumber}`);
+    if (!pickSeat) return toast.error("Select a seat");
+    if (missingSeats.length) {
+      return toast.error(
+        `Seat${missingSeats.length > 1 ? "s" : ""} ${missingSeats.join(", ")} not available in row ${pickRow}`
+      );
     }
     setSubmitting(true);
     try {
-      await doHold();
+      await doHold({
+        section: `${activeLevel} · Section ${pickSection}`,
+        row: pickRow,
+        number: pickSeat,
+      });
       nav("/checkout");
     } catch (err) {
       toast.error(err.message);
@@ -144,6 +183,7 @@ export default function Seats() {
   }
 
   const tabs = LEVEL_ORDER.filter((k) => levels.find((l) => l.level === k));
+  const noSeats = !seatsLoading && availableSeats.length === 0;
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8">
@@ -338,7 +378,10 @@ export default function Seats() {
                 label="Section"
                 value={pickSection}
                 onChange={setPickSection}
-                options={sectionsForLevel.map((s) => ({ value: s, label: `Section ${s}` }))}
+                options={sectionsForLevel.map((s) => ({
+                  value: s,
+                  label: `Section ${s}`,
+                }))}
               />
               <Select
                 label="Row"
@@ -346,23 +389,37 @@ export default function Seats() {
                 onChange={setPickRow}
                 options={ROWS.map((r) => ({ value: r, label: `Row ${r}` }))}
               />
-              <Select
-                label="Seat"
-                value={pickSeat}
-                onChange={setPickSeat}
-                options={SEATS.map((s) => ({ value: s, label: `Seat ${s}` }))}
-              />
+              <div className="col-span-2">
+                <Select
+                  label="Seat"
+                  value={pickSeat}
+                  onChange={setPickSeat}
+                  options={availableSeats.map((s) => ({
+                    value: s,
+                    label: `Seat ${s}`,
+                  }))}
+                  disabled={seatsLoading || noSeats}
+                />
+              </div>
             </div>
 
             <div className="mt-3 text-xs text-ink-muted">
               {activeLevel} · Section {pickSection} · Row {pickRow} · {seatRangeLabel}
-              {quantity > 1 ? ` (${quantity} consecutive)` : ""}
+              {quantity > 1 && pickSeat && !missingSeats.length
+                ? ` (${quantity} consecutive)`
+                : ""}
             </div>
+
+            {noSeats && (
+              <p className="mt-2 text-xs text-kenya-red">
+                No seats available in this row. Try another row or section.
+              </p>
+            )}
 
             <Button
               onClick={submitContinue}
               loading={submitting}
-              disabled={!cat}
+              disabled={!cat || noSeats || !pickSeat || missingSeats.length > 0}
               className="w-full mt-4"
               size="lg"
             >
@@ -407,12 +464,16 @@ export default function Seats() {
                   <div className="min-w-0">
                     <div className="font-semibold text-sm text-ink">{l.title}</div>
                     {l.range && (
-                      <div className="text-[11px] text-ink-muted mt-0.5">{l.range}</div>
+                      <div className="text-[11px] text-ink-muted mt-0.5">
+                        {l.range}
+                      </div>
                     )}
                   </div>
                   <div className="text-right shrink-0">
                     {soon ? (
-                      <div className="text-[11px] text-ink-muted">Not yet on sale</div>
+                      <div className="text-[11px] text-ink-muted">
+                        Not yet on sale
+                      </div>
                     ) : (
                       <>
                         <div className="text-[11px] text-ink-muted">
@@ -436,341 +497,59 @@ export default function Seats() {
   );
 }
 
-function Select({ label, value, onChange, options }) {
+function Select({ label, value, onChange, options, disabled = false }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[11px] text-ink-muted">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface border border-surface-line rounded-lg px-2.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-kenya-gold"
+        disabled={disabled}
+        className="bg-surface border border-surface-line rounded-lg px-2.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-kenya-gold disabled:opacity-50"
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+        {options.length === 0 ? (
+          <option value="">No seats</option>
+        ) : (
+          options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))
+        )}
       </select>
     </label>
   );
 }
 
 function StadiumMap({ level }) {
-  // Per-level ring geometry: radius, section count, seat count per section
-  const RINGS = {
-    L1: { rx: 170, ry: 122, sections: 28, seatsPerSection: 5, active: true },
-    L2: { rx: 145, ry: 100, sections: 20, seatsPerSection: 4, active: true },
-    L3: { rx: 120, ry: 80, sections: 36, seatsPerSection: 3, active: true },
-    gold: { rx: 120, ry: 80, sections: 5, seatsPerSection: 6, active: true },
-    platinum: { rx: 120, ry: 80, sections: 5, seatsPerSection: 6, active: true },
-    skybox: { rx: 120, ry: 80, sections: 58, seatsPerSection: 2, active: true },
-    accessible: { rx: 120, ry: 80, sections: 28, seatsPerSection: 4, active: true },
-  };
+  const stroke = "rgba(148,163,184,0.25)";
 
-  const ring = RINGS[level] || RINGS.L1;
-  const cx = 240;
-  const cy = 180;
-
-  // Kenya flag colors
-  const black = "#0e1116";
-  const red = "#bb0000";
-  const green = "#006600";
-  const gold = "#f5a623";
-
-  // Determine fill style per level
-  const sectionFill =
-    level === "gold" || level === "platinum" || level === "skybox"
-      ? gold
-      : level === "accessible"
-      ? "#3b82f6"
-      : green;
-
-  // Section positions
-  const sectionDots = Array.from({ length: ring.sections }).map((_, i) => {
-    const angle = (i / ring.sections) * Math.PI * 2 - Math.PI / 2;
-    return {
-      i,
-      angle,
-      x: cx + Math.cos(angle) * ring.rx,
-      y: cy + Math.sin(angle) * ring.ry,
-    };
-  });
-
-  // Seat dots: orbit around each section
-  const seatDots = [];
-  sectionDots.forEach((sec, si) => {
-    for (let s = 0; s < ring.seatsPerSection; s++) {
-      const offset = (s - (ring.seatsPerSection - 1) / 2) * 4;
-      const seatAngle =
-        (si / ring.sections) * Math.PI * 2 +
-        (s - (ring.seatsPerSection - 1) / 2) * 0.012 -
-        Math.PI / 2;
-      seatDots.push({
-        x: cx + Math.cos(seatAngle) * (ring.rx + offset + 8),
-        y: cy + Math.sin(seatAngle) * (ring.ry + offset + 8),
-        sectionIndex: si,
-      });
-    }
-  });
+  const ring =
+    level === "L1"
+      ? { rx: 150, ry: 101, count: 28, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
+      : level === "L2"
+      ? { rx: 130, ry: 85, count: 20, color: "rgba(34,197,94,0.5)", stroke: "rgba(34,197,94,0.8)" }
+      : level === "L3"
+      ? { rx: 110, ry: 68, count: 36, color: "rgba(148,163,184,0.4)", stroke: "rgba(148,163,184,0.6)" }
+      : { rx: 110, ry: 68, count: 16, color: "rgba(245,166,35,0.5)", stroke: "rgba(245,166,35,0.8)" };
 
   return (
-    <svg
-      viewBox="0 0 480 360"
-      className="w-full h-full max-w-[720px]"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <defs>
-        <radialGradient id="pitchGrad" cx="50%" cy="50%" r="60%">
-          <stop offset="0%" stopColor={green} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={green} stopOpacity="0.05" />
-        </radialGradient>
-        <radialGradient id="stadiumGrad" cx="50%" cy="40%" r="70%">
-          <stop offset="0%" stopColor={black} stopOpacity="0" />
-          <stop offset="100%" stopColor={black} stopOpacity="0.6" />
-        </radialGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="2" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
+    <svg viewBox="0 0 400 300" className="w-full h-full max-w-[560px]">
+      <ellipse cx="200" cy="150" rx="160" ry="110" fill="none" stroke={stroke} strokeWidth="1.5" />
+      <ellipse cx="200" cy="150" rx="140" ry="92" fill="none" stroke={stroke} strokeWidth="1" />
+      <ellipse cx="200" cy="150" rx="120" ry="74" fill="none" stroke={stroke} strokeWidth="1" />
+      <ellipse cx="200" cy="150" rx="100" ry="56" fill="none" stroke={stroke} strokeWidth="1" />
 
-      {/* Kenya flag outer ring */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx + 28}
-        ry={ring.ry + 22}
-        fill="none"
-        stroke={black}
-        strokeWidth="2"
-        opacity="0.4"
-      />
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx + 22}
-        ry={ring.ry + 18}
-        fill="none"
-        stroke={red}
-        strokeWidth="1.5"
-        opacity="0.5"
-      />
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx + 16}
-        ry={ring.ry + 14}
-        fill="none"
-        stroke={green}
-        strokeWidth="1.5"
-        opacity="0.5"
-      />
+      <ellipse cx="200" cy="150" rx="80" ry="42" fill="#22c55e" opacity="0.08" />
+      <rect x="140" y="130" width="120" height="40" fill="#22c55e" opacity="0.12" />
 
-      {/* Stadium shadow gradient */}
-      <ellipse cx={cx} cy={cy} rx={ring.rx + 40} ry={ring.ry + 30} fill="url(#stadiumGrad)" />
-
-      {/* Outer ring (structure) */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx + 10}
-        ry={ring.ry + 8}
-        fill="none"
-        stroke="rgba(148,163,184,0.3)"
-        strokeWidth="1"
-      />
-
-      {/* Main section ring */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx}
-        ry={ring.ry}
-        fill="none"
-        stroke="rgba(148,163,184,0.4)"
-        strokeWidth="2"
-        strokeDasharray="3 3"
-      />
-
-      {/* Inner service ring */}
-      <ellipse
-        cx={cx}
-        cy={cy}
-        rx={ring.rx - 25}
-        ry={ring.ry - 18}
-        fill="none"
-        stroke="rgba(148,163,184,0.2)"
-        strokeWidth="1"
-      />
-
-      {/* Pitch (center) */}
-      <ellipse cx={cx} cy={cy} rx="90" ry="55" fill="url(#pitchGrad)" />
-      <rect
-        x={cx - 75}
-        y={cy - 40}
-        width="150"
-        height="80"
-        fill="none"
-        stroke={green}
-        strokeOpacity="0.4"
-        strokeWidth="1.5"
-      />
-      {/* Center line */}
-      <line
-        x1={cx}
-        y1={cy - 40}
-        x2={cx}
-        y2={cy + 40}
-        stroke={green}
-        strokeOpacity="0.4"
-        strokeWidth="1.5"
-      />
-      {/* Center circle */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r="14"
-        fill="none"
-        stroke={green}
-        strokeOpacity="0.5"
-        strokeWidth="1.5"
-      />
-      <circle cx={cx} cy={cy} r="2" fill={green} opacity="0.6" />
-
-      {/* Goal areas */}
-      <rect
-        x={cx - 100}
-        y={cy - 20}
-        width="25"
-        height="40"
-        fill="none"
-        stroke={green}
-        strokeOpacity="0.35"
-        strokeWidth="1"
-      />
-      <rect
-        x={cx + 75}
-        y={cy - 20}
-        width="25"
-        height="40"
-        fill="none"
-        stroke={green}
-        strokeOpacity="0.35"
-        strokeWidth="1"
-      />
-
-      {/* Section markers — small arcs/capsules around the ring */}
-      {sectionDots.map((sec) => {
-        const isActive = sec.i % 3 !== 0; // simulate some sold-out sections
-        return (
-          <g key={`sec-${sec.i}`}>
-            {/* Section block */}
-            <rect
-              x={sec.x - 5}
-              y={sec.y - 3}
-              width="10"
-              height="6"
-              rx="1"
-              fill={isActive ? sectionFill : "#2a3240"}
-              opacity={isActive ? 0.55 : 0.35}
-              transform={`rotate(${(sec.angle * 180) / Math.PI} ${sec.x} ${sec.y})`}
-            />
-            {/* Section number label on hover highlight */}
-            <circle
-              cx={sec.x}
-              cy={sec.y}
-              r="8"
-              fill="transparent"
-              className="cursor-pointer"
-            >
-              <title>Section {sec.i + 1}</title>
-            </circle>
-          </g>
-        );
-      })}
-
-      {/* Seat dots (small, dense) */}
-      {seatDots.map((seat, idx) => (
-        <circle
-          key={`seat-${idx}`}
-          cx={seat.x}
-          cy={seat.y}
-          r="1.2"
-          fill={sectionFill}
-          opacity="0.7"
-        />
-      ))}
-
-      {/* Cardinal markers */}
-      <text
-        x={cx}
-        y={cy - ring.ry - 18}
-        textAnchor="middle"
-        fontSize="10"
-        fontWeight="700"
-        fill={gold}
-      >
-        N
-      </text>
-      <text
-        x={cx}
-        y={cy + ring.ry + 28}
-        textAnchor="middle"
-        fontSize="10"
-        fontWeight="700"
-        fill={gold}
-        opacity="0.5"
-      >
-        S
-      </text>
-      <text
-        x={cx - ring.rx - 30}
-        y={cy + 4}
-        textAnchor="middle"
-        fontSize="10"
-        fontWeight="700"
-        fill={gold}
-        opacity="0.5"
-      >
-        W
-      </text>
-      <text
-        x={cx + ring.rx + 30}
-        y={cy + 4}
-        textAnchor="middle"
-        fontSize="10"
-        fontWeight="700"
-        fill={gold}
-        opacity="0.5"
-      >
-        E
-      </text>
-
-      {/* Level badge */}
-      <g filter="url(#glow)">
-        <rect
-          x={cx - 28}
-          y={cy + ring.ry + 34}
-          width="56"
-          height="18"
-          rx="9"
-          fill={black}
-          stroke={gold}
-          strokeWidth="1"
-        />
-        <text
-          x={cx}
-          y={cy + ring.ry + 47}
-          textAnchor="middle"
-          fontSize="10"
-          fontWeight="700"
-          fill={gold}
-        >
-          {level}
-        </text>
+      <g fill={ring.color} stroke={ring.stroke} strokeWidth="0.5">
+        {Array.from({ length: ring.count }).map((_, i) => {
+          const a = (i / ring.count) * Math.PI * 2;
+          const x = 200 + Math.cos(a) * ring.rx;
+          const y = 150 + Math.sin(a) * ring.ry;
+          return <circle key={i} cx={x} cy={y} r="4" />;
+        })}
       </g>
     </svg>
   );

@@ -17,6 +17,9 @@ const LEVEL_META = {
 
 const LEVEL_ORDER = ["L1", "L2", "L3", "gold", "platinum", "skybox", "accessible"];
 
+const TAKEN_STATUSES = ["held", "paid", "used"];
+const MAX_SEATS_PER_ROW = 30;
+
 export const getMatch = asyncHandler(async (req, res) => {
   const match = await Match.findOne({ singleton: "main" }).lean();
   if (!match) throw ApiError.notFound("Match not configured");
@@ -89,4 +92,51 @@ export const listLevels = asyncHandler(async (req, res) => {
   });
 
   ok(res, list);
+});
+
+export const listSeats = asyncHandler(async (req, res) => {
+  const { level, section, row } = req.query;
+  if (!level || !section || !row) {
+    throw ApiError.badRequest("level, section, row required", "MISSING_PARAMS");
+  }
+
+  const sectionKey = `${level} · Section ${section}`;
+
+  const category = await PriceCategory.findOne({ level }).lean();
+  const maxSeats =
+    category?.capacity > 0
+      ? Math.min(MAX_SEATS_PER_ROW, category.capacity)
+      : MAX_SEATS_PER_ROW;
+
+  const now = new Date();
+
+  const taken = await Ticket.find({
+    "seat.section": sectionKey,
+    "seat.row": String(row),
+    status: { $in: TAKEN_STATUSES },
+    $or: [
+      { status: { $ne: "held" } },
+      { holdExpiresAt: { $gt: now } },
+    ],
+  })
+    .select("seat.number status holdExpiresAt")
+    .lean();
+
+  const takenMap = {};
+  for (const t of taken) {
+    takenMap[t.seat.number] = t.status;
+  }
+
+  const allNumbers = Array.from({ length: maxSeats }, (_, i) => String(i + 1));
+  const available = allNumbers.filter((n) => !takenMap[n]);
+
+  ok(res, {
+    level,
+    section: String(section),
+    row: String(row),
+    maxSeats,
+    total: allNumbers.length,
+    taken: Object.entries(takenMap).map(([number, status]) => ({ number, status })),
+    available,
+  });
 });
