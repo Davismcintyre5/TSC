@@ -1,7 +1,6 @@
 import "../scripts/dnsSet.js";
 import "dotenv/config";
 
-import { connectDB, disconnectDB } from "../config/db.js";
 import PriceCategory from "../models/PriceCategory.js";
 import { logger } from "../utils/logger.js";
 
@@ -9,14 +8,11 @@ const MIN_DROP = 1;
 const MAX_DROP = 20;
 
 export const reduceSeats = async () => {
-  await connectDB();
-
   const cats = await PriceCategory.find({ isActive: true })
     .select("_id level name capacity")
     .lean();
 
   if (!cats.length) {
-    await disconnectDB();
     logger.debug("reduce-seats: no active categories");
     return { ok: true, updated: 0, dropped: 0 };
   }
@@ -32,11 +28,7 @@ export const reduceSeats = async () => {
 
     if (actualDrop === 0) continue;
 
-    await PriceCategory.updateOne(
-      { _id: c._id },
-      { $set: { capacity: next } }
-    );
-
+    await PriceCategory.updateOne({ _id: c._id }, { $set: { capacity: next } });
     totalDropped += actualDrop;
     changes.push({
       level: c.level,
@@ -46,8 +38,6 @@ export const reduceSeats = async () => {
       dropped: actualDrop,
     });
   }
-
-  await disconnectDB();
 
   if (changes.length) {
     logger.info(
@@ -62,13 +52,12 @@ export const reduceSeats = async () => {
 };
 
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}`) {
-  reduceSeats()
-    .then((r) => {
-      console.log(r);
-      process.exit(r.ok ? 0 : 1);
-    })
-    .catch((e) => {
-      console.error(e);
-      process.exit(1);
-    });
+  const { connectDB, disconnectDB } = await import("../config/db.js");
+  await connectDB();
+  try {
+    console.log(await reduceSeats());
+  } finally {
+    await disconnectDB();
+    process.exit(0);
+  }
 }

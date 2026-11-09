@@ -6,6 +6,36 @@ export const notFound = (req, res, next) => {
 };
 
 export const errorHandler = (err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  if (err.name === "MongoNotConnectedError" || err.type === "MongoNotConnectedError") {
+    logger.warn(
+      { path: req.originalUrl, method: req.method },
+      "Mongo not connected — likely reconnecting"
+    );
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: "DB_UNAVAILABLE",
+        message: "Database temporarily unavailable. Please retry.",
+      },
+    });
+  }
+
+  if (err.name === "MongooseServerSelectionError") {
+    logger.warn(
+      { path: req.originalUrl, method: req.method },
+      "Mongo server selection failed"
+    );
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: "DB_UNAVAILABLE",
+        message: "Database temporarily unavailable. Please retry.",
+      },
+    });
+  }
+
   const status = err.statusCode || 500;
   const code = err.code || "INTERNAL";
   const message = err.isOperational ? err.message : "Internal server error";
